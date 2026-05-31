@@ -58,7 +58,7 @@ gigabyte-bot/
 git clone https://github.com/GigabyteVPN/gigabyte-bot.git
 cd gigabyte-bot
 
-2. Настройка переменных окружения
+### 2. Настройка переменных окружения
 
 Создайте файл .env (никогда не коммитьте его!):
 BOT_TOKEN=ваш_токен_бота
@@ -89,19 +89,19 @@ SNI=sni
 SHORT_ID=short_id
 FP=chrome
 
-3. Получение SSL-сертификатов
+### 3. Получение SSL-сертификатов
 docker run -it --rm -v ./certs:/etc/letsencrypt -p 80:80 certbot/certbot certonly --standalone -d ваш-домен.com --email your@email.com --agree-tos --non-interactive
 cp certs/live/ваш-домен.com/fullchain.pem certs/
 cp certs/live/ваш-домен.com/privkey.pem certs/
 
-4. Запуск бота
+### 4. Запуск бота
 docker-compose up -d --build
 
-5. Проверка вебхука
+### 5. Проверка вебхука
 curl "https://api.telegram.org/bot<ваш_токен>/getWebhookInfo"
 Должен быть "url":"https://ваш-домен.com/webhook".
 
-Обновление бота
+### Обновление бота
 # Локально
 git pull
 git add .
@@ -114,7 +114,7 @@ git pull
 docker-compose down
 docker-compose up -d --build
 
-Безопасность
+### Безопасность
 
 Все секреты хранятся в .env, который не добавляется в Git.
 Вход на сервер только по SSH-ключам, пароль отключён.
@@ -124,7 +124,7 @@ Docker-контейнеры запускаются от непривилегир
 
 По вопросам эксплуатации и доработок обращайтесь в Telegram (@givpn_bot) или создавайте Issue на GitHub.
 
-Лицензия
+### Лицензия
 
 MIT License – используйте свободно, но с указанием авторства.
 
