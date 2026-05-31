@@ -2875,7 +2875,13 @@ async def error_handler(event: ErrorEvent):
     logger.error(f"❌ Критическая ошибка: {event.exception}", exc_info=True)
 
 # ====================== ЗАПУСК (Webhook + Long Polling как fallback) ======================
-async def on_startup(bot: Bot, base_url: str, webhook_path: str, secret_token: str):
+async def on_startup(bot: Bot):
+    WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+    if not WEBHOOK_HOST:
+        return
+    base_url = WEBHOOK_HOST.rstrip('/')
+    webhook_path = "/webhook"
+    secret_token = os.getenv("WEBHOOK_SECRET")
     await bot.set_webhook(f"{base_url}{webhook_path}", secret_token=secret_token)
     logger.info(f"✅ Webhook установлен: {base_url}{webhook_path}")
 
@@ -2892,7 +2898,7 @@ async def main():
     if WEBHOOK_HOST:
         # Режим вебхука (production)
         base_url = WEBHOOK_HOST.rstrip('/')
-        dp.startup.register(lambda: on_startup(bot, base_url, WEBHOOK_PATH, WEBHOOK_SECRET))
+        dp.startup.register(on_startup)
         dp.shutdown.register(on_shutdown)
 
         app = web.Application()
