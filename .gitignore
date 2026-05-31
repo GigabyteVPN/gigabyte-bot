@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+.env
+.venv
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+logs/
+*.log
+
+# Certificates (их не нужно хранить в репозитории)
+certs/
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+.DS_Store
