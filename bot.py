@@ -27,7 +27,7 @@ from aiogram.types import (
     Message, ReplyKeyboardMarkup, KeyboardButton, ErrorEvent,
     BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, SuccessfulPayment, CallbackQuery,
-    BotCommand
+    FSInputFile, InputMediaPhoto, BotCommand
 )
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -35,6 +35,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums.parse_mode import ParseMode
 
+# Дополнительные импорты для вебхука
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
@@ -113,6 +114,7 @@ class PriceManager:
             return
         cbr_rate = None
         market_rate = None
+        # 1. Курс ЦБ РФ через exchangerate.host (работает надёжно)
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get("https://api.exchangerate.host/latest?base=USD&symbols=RUB", timeout=10)
@@ -123,6 +125,7 @@ class PriceManager:
                         self.usd_cbr = cbr_rate
         except Exception as e:
             logger.warning(f"Ошибка получения курса USD/RUB из exchangerate.host: {e}")
+        # 2. Fallback: exchangerate-api.com
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
@@ -132,7 +135,7 @@ class PriceManager:
                     self.usd_market = market_rate
         except Exception as e:
             logger.warning(f"Ошибка получения рыночного курса: {e}")
-
+        # Определяем эффективный курс
         if cbr_rate and market_rate:
             self.usd_effective = (cbr_rate + market_rate) / 2
         elif cbr_rate:
@@ -140,10 +143,12 @@ class PriceManager:
         elif market_rate:
             self.usd_effective = market_rate
         else:
+            # Если не удалось получить ни одного курса, используем последнее известное значение
             if self.usd_effective is None:
                 self.usd_effective = 90.0
             logger.warning("Не удалось получить актуальные курсы, используется предыдущее значение")
 
+        # 3. Курс USDT/RUB от CoinGecko
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub", timeout=10)
@@ -193,6 +198,14 @@ price_manager = PriceManager()
 
 # ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 def get_user_identifier(user_id: int, username: Optional[str] = None, full_name: Optional[str] = None) -> str:
+    if username:
+        return f"@{username}"
+    elif full_name:
+        return full_name
+    else:
+        return str(user_id)
+
+def get_user_identifier_by_data(username: Optional[str], full_name: Optional[str], user_id: int) -> str:
     if username:
         return f"@{username}"
     elif full_name:
@@ -420,6 +433,7 @@ class XUIApi:
             return False
 
     async def update_client_expiry(self, client_uuid: str, new_expiry_ms: int) -> bool:
+        """Обновляет expiryTime и включает клиента"""
         if not self.cookies and not await self.login():
             return False
 
@@ -527,94 +541,92 @@ class XUIApi:
 # ====================== СИНХРОНИЗАЦИЯ КЛИЕНТОВ ======================
 async def sync_all_servers_with_supabase():
     logger.info("🔄 Запуск полной синхронизации клиентов...")
-    try:
-        servers = await load_servers_from_supabase()
-        if not servers:
-            logger.warning("⚠️ Нет активных серверов.")
-            return
+    servers = await load_servers_from_supabase()
+    if not servers:
+        logger.warning("⚠️ Нет активных серверов.")
+        return
 
-        now_ts = int(datetime.now().timestamp() * 1000)
+    now_ts = int(datetime.now().timestamp() * 1000)
 
-        for server in servers:
-            server_id = server["id"]
-            xui = XUIApi(server)
-            panel_clients = await xui.get_clients()
-            await xui.close()
+    for server in servers:
+        server_id = server["id"]
+        xui = XUIApi(server)
+        panel_clients = await xui.get_clients()
+        await xui.close()
 
-            if not panel_clients:
-                logger.warning(f"⚠️ Нет клиентов из панели {server['name']}")
-                continue
+        if not panel_clients:
+            logger.warning(f"⚠️ Нет клиентов из панели {server['name']}")
+            continue
 
-            for p_client in panel_clients:
-                existing = await supabase.table("subscriptions").select("*").eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
-                if not existing.data:
-                    global_exists = await supabase.table("subscriptions").select("*").eq("client_uuid", p_client["id"]).execute()
-                    if global_exists.data:
-                        await supabase.table("subscriptions").update({
+        for p_client in panel_clients:
+            existing = await supabase.table("subscriptions").select("*").eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
+            if not existing.data:
+                global_exists = await supabase.table("subscriptions").select("*").eq("client_uuid", p_client["id"]).execute()
+                if global_exists.data:
+                    await supabase.table("subscriptions").update({
+                        "server_id": server_id,
+                        "email": p_client.get("email"),
+                        "sub_id": p_client.get("subId", generate_sub_id()),
+                        "expiry_date": p_client.get("expiryTime"),
+                        "status": "active",
+                        "last_sync": int(datetime.now().timestamp()),
+                        "user_id": None
+                    }).eq("client_uuid", p_client["id"]).execute()
+                    logger.info(f"🔄 Клиент {p_client['id']} перенесён на сервер {server['name']}")
+                else:
+                    try:
+                        await supabase.table("subscriptions").insert({
+                            "user_id": None,
                             "server_id": server_id,
+                            "client_uuid": p_client["id"],
                             "email": p_client.get("email"),
                             "sub_id": p_client.get("subId", generate_sub_id()),
                             "expiry_date": p_client.get("expiryTime"),
                             "status": "active",
-                            "last_sync": int(datetime.now().timestamp()),
-                            "user_id": None
-                        }).eq("client_uuid", p_client["id"]).execute()
-                        logger.info(f"🔄 Клиент {p_client['id']} перенесён на сервер {server['name']}")
-                    else:
-                        try:
-                            await supabase.table("subscriptions").insert({
-                                "user_id": None,
-                                "server_id": server_id,
-                                "client_uuid": p_client["id"],
-                                "email": p_client.get("email"),
-                                "sub_id": p_client.get("subId", generate_sub_id()),
-                                "expiry_date": p_client.get("expiryTime"),
-                                "status": "active",
-                                "last_sync": int(datetime.now().timestamp())
-                            }).execute()
-                            logger.info(f"➕ Клиент {p_client['id']} добавлен из панели {server['name']}")
-                        except Exception as e:
-                            logger.error(f"❌ Ошибка добавления клиента {p_client['id']}: {e}")
-                else:
-                    await supabase.table("subscriptions").update({
-                        "email": p_client.get("email"),
-                        "expiry_date": p_client.get("expiryTime"),
-                        "last_sync": int(datetime.now().timestamp())
-                    }).eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
+                            "last_sync": int(datetime.now().timestamp())
+                        }).execute()
+                        logger.info(f"➕ Клиент {p_client['id']} добавлен из панели {server['name']}")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка добавления клиента {p_client['id']}: {e}")
+            else:
+                await supabase.table("subscriptions").update({
+                    "email": p_client.get("email"),
+                    "expiry_date": p_client.get("expiryTime"),
+                    "last_sync": int(datetime.now().timestamp())
+                }).eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
 
-            db_clients = await supabase.table("subscriptions").select("*").eq("server_id", server_id).eq("status", "active").execute()
-            for db_client in db_clients.data:
-                found = any(c["id"] == db_client["client_uuid"] for c in panel_clients)
-                if not found:
-                    logger.warning(f"🔄 Восстановление клиента {db_client['client_uuid']} на сервере {server['name']}")
-                    is_enable = db_client["expiry_date"] > now_ts or db_client["expiry_date"] == 0
-                    client_dict = {
-                        "id": db_client["client_uuid"],
-                        "flow": "xtls-rprx-vision",
-                        "email": db_client["email"],
-                        "limitIp": 2,
-                        "totalGB": 0,
-                        "expiryTime": db_client["expiry_date"],
-                        "enable": is_enable,
-                        "tgId": str(db_client.get("user_id") or ""),
-                        "subId": db_client["sub_id"],
-                        "reset": 0
-                    }
-                    xui = XUIApi(server)
-                    if await xui.add_client(client_dict):
-                        await supabase.table("subscriptions").update({"last_sync": int(datetime.now().timestamp())}).eq("id", db_client["id"]).execute()
-                        logger.info(f"✅ Клиент {db_client['client_uuid']} восстановлен")
-                    await xui.close()
-        logger.info("✅ Полная синхронизация завершена.")
-    except Exception as e:
-        logger.error(f"Ошибка в sync_all_servers_with_supabase: {e}")
+        db_clients = await supabase.table("subscriptions").select("*").eq("server_id", server_id).eq("status", "active").execute()
+        for db_client in db_clients.data:
+            found = any(c["id"] == db_client["client_uuid"] for c in panel_clients)
+            if not found:
+                logger.warning(f"🔄 Восстановление клиента {db_client['client_uuid']} на сервере {server['name']}")
+                is_enable = db_client["expiry_date"] > now_ts or db_client["expiry_date"] == 0
+                client_dict = {
+                    "id": db_client["client_uuid"],
+                    "flow": "xtls-rprx-vision",
+                    "email": db_client["email"],
+                    "limitIp": 2,
+                    "totalGB": 0,
+                    "expiryTime": db_client["expiry_date"],
+                    "enable": is_enable,
+                    "tgId": str(db_client.get("user_id") or ""),
+                    "subId": db_client["sub_id"],
+                    "reset": 0
+                }
+                xui = XUIApi(server)
+                if await xui.add_client(client_dict):
+                    await supabase.table("subscriptions").update({"last_sync": int(datetime.now().timestamp())}).eq("id", db_client["id"]).execute()
+                    logger.info(f"✅ Клиент {db_client['client_uuid']} восстановлен")
+                await xui.close()
+
+    logger.info("✅ Полная синхронизация завершена.")
 
 async def force_import_clients_from_panel(message: Message = None):
     await init_supabase()
     servers = await load_servers_from_supabase()
     if not servers:
         if message:
-            await message.answer(reply_to_message_id=None, text="❌ Нет активных серверов.")
+            await message.answer("❌ Нет активных серверов.")
         return
     total_imported = 0
     for server in servers:
@@ -623,7 +635,7 @@ async def force_import_clients_from_panel(message: Message = None):
         await xui.close()
         if not panel_clients:
             if message:
-                await message.answer(reply_to_message_id=None, text=f"❌ Не удалось получить клиентов с сервера {server['name']}")
+                await message.answer(f"❌ Не удалось получить клиентов с сервера {server['name']}")
             continue
         count = 0
         for p_client in panel_clients:
@@ -657,9 +669,9 @@ async def force_import_clients_from_panel(message: Message = None):
                         logger.error(f"❌ Ошибка импорта {p_client['id']}: {e}")
         total_imported += count
         if message:
-            await message.answer(reply_to_message_id=None, text=f"✅ С сервера {server['name']} импортировано {count} новых клиентов.")
+            await message.answer(f"✅ С сервера {server['name']} импортировано {count} новых клиентов.")
     if message:
-        await message.answer(reply_to_message_id=None, text=f"🎉 Всего импортировано {total_imported} клиентов.")
+        await message.answer(f"🎉 Всего импортировано {total_imported} клиентов.")
 
 async def sync_all_servers_periodically():
     while True:
@@ -770,7 +782,7 @@ async def create_subscription(user_id: int, server: dict, months: float, rub_amo
     email = generate_client_email()
     if months == -1:
         expiry = int((datetime.now() + timedelta(days=3650)).timestamp() * 1000)
-    elif months == 0.233:
+    elif months == 0.233:  # Trial 7 days
         expiry = int((datetime.now() + timedelta(days=7)).timestamp() * 1000)
     else:
         days = int(months * 30)
@@ -997,7 +1009,7 @@ async def back_handler(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state in (BuyStates.select_server, ExtendSubscriptionStates.select_tariff, ActivateKeyStates.waiting_code, ResendHashState.waiting_hash):
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
     elif current_state == BuyStates.select_tariff:
         await state.set_state(BuyStates.select_server)
         await show_servers(message)
@@ -1009,7 +1021,7 @@ async def back_handler(message: Message, state: FSMContext):
         await show_payment_methods(message)
     elif current_state in (BuyStates.waiting_crypto_payment, ExtendSubscriptionStates.waiting_crypto_payment):
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
     elif current_state == BuyStates.wait_crypto_hash:
         await state.set_state(BuyStates.select_crypto_currency)
         await show_crypto_currencies(message)
@@ -1024,16 +1036,16 @@ async def back_handler(message: Message, state: FSMContext):
         await show_crypto_currencies(message)
     elif current_state == TrialStates.select_server:
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
     elif current_state == AdminCreateSubStates.select_server:
         await state.set_state(AdminCreateSubStates.waiting_user_id)
-        await message.answer(reply_to_message_id=None, text="👤 Введите Telegram ID пользователя:")
+        await message.answer("👤 Введите Telegram ID пользователя:")
     elif current_state == AdminGenerateKeyStates.select_server:
         await state.set_state(AdminGenerateKeyStates.waiting_months)
-        await message.answer(reply_to_message_id=None, text="🎫 <b>Выберите срок действия ключа</b>", parse_mode=ParseMode.HTML, reply_markup=promo_months_keyboard())
+        await message.answer("🎫 <b>Выберите срок действия ключа</b>", parse_mode=ParseMode.HTML, reply_markup=promo_months_keyboard())
     else:
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 @router.message(F.text == "❌ Отмена")
 async def universal_cancel(message: Message, state: FSMContext):
@@ -1043,10 +1055,10 @@ async def universal_cancel(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="✅ Да, отменить", callback_data="confirm_cancel"),
              InlineKeyboardButton(text="❌ Нет, продолжить", callback_data="cancel_cancel")]
         ])
-        await message.answer(reply_to_message_id=None, text="⚠️ <b>Вы уверены, что хотите отменить оплату?</b>\n\nВсе данные о заказе будут удалены.", parse_mode=ParseMode.HTML, reply_markup=kb)
+        await message.answer("⚠️ <b>Вы уверены, что хотите отменить оплату?</b>\n\nВсе данные о заказе будут удалены.", parse_mode=ParseMode.HTML, reply_markup=kb)
     else:
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="✅ Действие отменено.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("✅ Действие отменено.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 @router.callback_query(lambda c: c.data == "confirm_cancel")
 async def confirm_cancel_callback(callback: CallbackQuery, state: FSMContext):
@@ -1057,13 +1069,13 @@ async def confirm_cancel_callback(callback: CallbackQuery, state: FSMContext):
         await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
     await state.clear()
     await callback.message.edit_text("✅ Оплата отменена, заказ удалён.")
-    await callback.message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
+    await callback.message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
 @router.callback_query(lambda c: c.data == "cancel_cancel")
 async def cancel_cancel_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
-    await callback.message.answer(reply_to_message_id=None, text="✅ Продолжаем ожидание хеша.", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
+    await callback.message.answer("✅ Продолжаем ожидание хеша.", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
 # ====================== /start ======================
@@ -1073,12 +1085,11 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     await message.answer(
-        reply_to_message_id=None,
-        text="👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
-             "✨ Максимальная скорость\n"
-             "🔒 Полная анонимность\n"
-             "🛡️ Надёжная защита\n\n"
-             "Выберите действие ниже 👇",
+        "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
+        "✨ Максимальная скорость\n"
+        "🔒 Полная анонимность\n"
+        "🛡️ Надёжная защита\n\n"
+        "Выберите действие ниже 👇",
         parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(is_admin(user_id))
     )
@@ -1090,15 +1101,15 @@ async def request_trial(message: Message, state: FSMContext):
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     res = await supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
     if res.data:
-        await message.answer(reply_to_message_id=None, text="✨ Вы уже активировали пробный период. Надеемся, вам понравилось! Для продолжения используйте платную подписку.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("✨ Вы уже активировали пробный период. Надеемся, вам понравилось! Для продолжения используйте платную подписку.", reply_markup=main_keyboard(is_admin(user_id)))
         return
     servers = await load_servers_from_supabase()
     if not servers:
-        await message.answer(reply_to_message_id=None, text="❌ Нет доступных серверов.")
+        await message.answer("❌ Нет доступных серверов.")
         return
     await state.set_state(TrialStates.select_server)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=s["name"], callback_data=f"trial_server_{s['id']}")] for s in servers])
-    await message.answer(reply_to_message_id=None, text="🌍 <b>Выберите страну для пробной подписки (7 дней)</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("🌍 <b>Выберите страну для пробной подписки (7 дней)</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.callback_query(lambda c: c.data.startswith("trial_server_"))
 async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
@@ -1109,7 +1120,7 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Сервер не найден", show_alert=True)
         return
     user_id = callback.from_user.id
-    await callback.message.answer(reply_to_message_id=None, text="⏳ Создаю вашу бесплатную подписку на 7 дней...")
+    await callback.message.answer("⏳ Создаю вашу бесплатную подписку на 7 дней...")
     payment_uid = generate_payment_uid("TRIAL")
     pay_res = await supabase.table("payments").insert({
         "payment_uid": payment_uid,
@@ -1124,16 +1135,15 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
     if result:
         config_text = generate_config_for_connection(result)
         await callback.message.answer(
-            reply_to_message_id=None,
-            text="🎁 <b>Бесплатная неделя успешно активирована!</b>\n\n"
-                 f"{config_text}\n\n"
-                 "<i>Приятного использования!</i>",
+            "🎁 <b>Бесплатная неделя успешно активирована!</b>\n\n"
+            f"{config_text}\n\n"
+            "<i>Приятного использования!</i>",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
     else:
         await supabase.table("payments").delete().eq("id", payment_id).execute()
-        await callback.message.answer(reply_to_message_id=None, text="❌ Ошибка при выдаче тестовой подписки. Обратитесь в поддержку.")
+        await callback.message.answer("❌ Ошибка при выдаче тестовой подписки. Обратитесь в поддержку.")
     await state.clear()
     await callback.answer()
 
@@ -1141,10 +1151,9 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
 @router.message(F.text == "⭐ Купить звёзды")
 async def buy_stars(message: Message):
     await message.answer(
-        reply_to_message_id=None,
-        text="✨ <b>Пополнить баланс Telegram Stars</b>\n\n"
-             "Вы можете приобрести звёзды у официального бота @PremiumBot.\n"
-             "После покупки звёзд вернитесь и оплатите подписку через Telegram Stars.",
+        "✨ <b>Пополнить баланс Telegram Stars</b>\n\n"
+        "Вы можете приобрести звёзды у официального бота @PremiumBot.\n"
+        "После покупки звёзд вернитесь и оплатите подписку через Telegram Stars.",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⭐ Купить Telegram Stars", url="https://t.me/PremiumBot")]])
     )
@@ -1174,7 +1183,7 @@ async def get_stars_balance(bot: Bot) -> dict:
 async def admin_stars_balance(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer(reply_to_message_id=None, text="⏳ Запрашиваю баланс звёзд у Telegram...")
+    await message.answer("⏳ Запрашиваю баланс звёзд у Telegram...")
     try:
         bal = await get_stars_balance(bot)
         text = (
@@ -1184,10 +1193,10 @@ async def admin_stars_balance(message: Message):
             f"✅ Доступно: <b>{bal['available']}</b> ⭐\n\n"
             f"<i>Замороженные звёзды станут доступны через 21 день.</i>"
         )
-        await message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
         logger.error(f"Ошибка получения баланса звёзд: {e}")
-        await message.answer(reply_to_message_id=None, text=f"❌ Не удалось получить баланс: {e}", reply_markup=main_keyboard(True))
+        await message.answer(f"❌ Не удалось получить баланс: {e}", reply_markup=main_keyboard(True))
 
 # ====================== ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ======================
 @router.message(Command("buy"))
@@ -1203,7 +1212,7 @@ async def cmd_status(message: Message):
     user_id = message.from_user.id
     res = await supabase.table("subscriptions").select("server_id, expiry_date, sub_id").eq("user_id", user_id).eq("status", "active").execute()
     if not res.data:
-        await message.answer(reply_to_message_id=None, text="📭 У вас нет активных подписок.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("📭 У вас нет активных подписок.", reply_markup=main_keyboard(is_admin(user_id)))
         return
     servers = await load_servers_from_supabase()
     server_map = {s["id"]: s for s in servers}
@@ -1212,14 +1221,14 @@ async def cmd_status(message: Message):
         expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y %H:%M")
         server_name = server.get("name", "Сервер")
         text = f"🌍 <b>{server_name}</b>\n📅 Действует до: <code>{expiry}</code>\n🆔 <code>{sub['sub_id']}</code>"
-        await message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML)
+        await message.answer(text, parse_mode=ParseMode.HTML)
 
 @router.message(Command("extend"))
 async def cmd_extend(message: Message, state: FSMContext):
     user_id = message.from_user.id
     res = await supabase.table("subscriptions").select("sub_id, server_id").eq("user_id", user_id).eq("status", "active").limit(1).execute()
     if not res.data:
-        await message.answer(reply_to_message_id=None, text="❌ У вас нет активных подписок для продления.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ У вас нет активных подписок для продления.", reply_markup=main_keyboard(is_admin(user_id)))
         return
     sub = res.data[0]
     servers = await load_servers_from_supabase()
@@ -1255,7 +1264,7 @@ async def cmd_help(message: Message):
         "/help — Эта справка\n\n"
         "Также доступны кнопки в меню ниже 👇"
     )
-    await message.answer(reply_to_message_id=None, text=help_text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(message.from_user.id)))
+    await message.answer(help_text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 # ====================== ПРИВЕТСТВИЕ ======================
 GREETING_WORDS = {"привет", "hi", "hello", "здравствуй", "добрый день", "доброе утро", "добрый вечер", "хай", "всем привет"}
@@ -1267,16 +1276,16 @@ async def greeting_handler(message: Message):
 async def show_servers(message: Message):
     servers = await load_servers_from_supabase()
     if not servers:
-        await message.answer(reply_to_message_id=None, text="❌ Нет доступных серверов.")
+        await message.answer("❌ Нет доступных серверов.")
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=s["name"], callback_data=f"server_{s['id']}")] for s in servers])
-    await message.answer(reply_to_message_id=None, text="🌍 <b>Выберите страну сервера</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("🌍 <b>Выберите страну сервера</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def show_tariffs(message: Message, state: FSMContext):
     await load_tariffs()
     sorted_tariffs = sorted(TARIFFS.values(), key=lambda x: x["months"])
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"📅 {t['label']} — {t['rub']} ₽", callback_data=f"tariff_{t['months']}")] for t in sorted_tariffs])
-    await message.answer(reply_to_message_id=None, text="📦 <b>Выберите срок подписки</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("📦 <b>Выберите срок подписки</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def show_payment_methods(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1284,7 +1293,7 @@ async def show_payment_methods(message: Message):
          InlineKeyboardButton(text="₿ Криптовалюта", callback_data="method_crypto")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_tariff")]
     ])
-    await message.answer(reply_to_message_id=None, text="💵 <b>Выберите способ оплаты</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("💵 <b>Выберите способ оплаты</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def show_crypto_currencies(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1292,7 +1301,7 @@ async def show_crypto_currencies(message: Message):
          InlineKeyboardButton(text="💙 USDC (Arbitrum)", callback_data="crypto_USDC")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_method")]
     ])
-    await message.answer(reply_to_message_id=None, text="🪙 <b>Выберите криптовалюту</b>\n\nСеть: Arbitrum One", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("🪙 <b>Выберите криптовалюту</b>\n\nСеть: Arbitrum One", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.callback_query(lambda c: c.data == "back_to_tariff")
 async def back_to_tariff_callback(callback: CallbackQuery, state: FSMContext):
@@ -1567,7 +1576,7 @@ async def cancel_crypto_payment(callback: CallbackQuery, state: FSMContext):
         await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
     await state.clear()
     await callback.message.delete()
-    await callback.message.answer(reply_to_message_id=None, text="❌ Оплата отменена.", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
+    await callback.message.answer("❌ Оплата отменена.", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
 # ====================== ОБРАБОТЧИКИ КНОПОК "Я ОПЛАТИЛ" ======================
@@ -1594,14 +1603,13 @@ async def pay_confirm(callback: CallbackQuery, state: FSMContext):
 
     kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await callback.message.answer(
-        reply_to_message_id=None,
-        text="📎 <b>Отправьте TXID (хеш транзакции)</b>\n\n"
-             "📍 <b>Где взять TXID?</b>\n"
-             "• В вашем криптокошельке после отправки\n"
-             "• В обозревателе Arbitrum (arbiscan.io)\n\n"
-             "📝 <b>Пример хеша:</b>\n"
-             "<code>0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb4a1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0</code>\n\n"
-             "⚠️ Отправьте именно TXID транзакции, которой вы отправили средства.",
+        "📎 <b>Отправьте TXID (хеш транзакции)</b>\n\n"
+        "📍 <b>Где взять TXID?</b>\n"
+        "• В вашем криптокошельке после отправки\n"
+        "• В обозревателе Arbitrum (arbiscan.io)\n\n"
+        "📝 <b>Пример хеша:</b>\n"
+        "<code>0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb4a1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0</code>\n\n"
+        "⚠️ Отправьте именно TXID транзакции, которой вы отправили средства.",
         parse_mode=ParseMode.HTML,
         reply_markup=kb
     )
@@ -1619,16 +1627,15 @@ async def process_crypto_hash(message: Message, state: FSMContext):
             await supabase.table("payments").delete().eq("id", payment_id).execute()
             await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
         await state.clear()
-        await message.answer(reply_to_message_id=None, text="❌ Оплата отменена.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("❌ Оплата отменена.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
         return
 
     tx_hash = message.text.strip()
     if len(tx_hash) < 64 or not tx_hash.startswith("0x"):
         await message.answer(
-            reply_to_message_id=None,
-            text="❌ <b>Неверный формат TXID</b>\n\n"
-                 "Хеш должен начинаться с 0x и содержать 66 символов.\n"
-                 "Пожалуйста, проверьте и отправьте снова.",
+            "❌ <b>Неверный формат TXID</b>\n\n"
+            "Хеш должен начинаться с 0x и содержать 66 символов.\n"
+            "Пожалуйста, проверьте и отправьте снова.",
             parse_mode=ParseMode.HTML,
             reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
@@ -1640,21 +1647,20 @@ async def process_crypto_hash(message: Message, state: FSMContext):
 
     pay_res = await supabase.table("payments").select("status").eq("id", payment_id).execute()
     if not pay_res.data or pay_res.data[0]["status"] != "awaiting_hash":
-        await message.answer(reply_to_message_id=None, text="❌ Этот платёж уже обработан или не ожидает хеща.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Этот платёж уже обработан или не ожидает хеща.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
 
-    waiting_msg = await message.answer(reply_to_message_id=None, text="⏳ Проверяем транзакцию... Пожалуйста, подождите.")
+    waiting_msg = await message.answer("⏳ Проверяем транзакцию... Пожалуйста, подождите.")
     success, reason = await verify_arbitrum_tx(tx_hash, data["crypto_currency"], data["usd"])
     await waiting_msg.delete()
 
     if not success:
         await supabase.table("payments").update({"status": "pending_crypto"}).eq("id", payment_id).execute()
         await message.answer(
-            reply_to_message_id=None,
-            text=f"❌ {reason}\n\n"
-                 "Проверьте корректность TXID и попробуйте снова.\n"
-                 "Если проблема повторяется, обратитесь в поддержку.",
+            f"❌ {reason}\n\n"
+            "Проверьте корректность TXID и попробуйте снова.\n"
+            "Если проблема повторяется, обратитесь в поддержку.",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
@@ -1662,7 +1668,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
 
     dup = await supabase.table("payments").select("id").eq("tx_hash", tx_hash).execute()
     if dup.data:
-        await message.answer(reply_to_message_id=None, text="❌ Этот TXID уже использован для другого платежа.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Этот TXID уже использован для другого платежа.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
 
@@ -1674,11 +1680,11 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         days = int(months * 30)
         sub_res = await supabase.table("subscriptions").select("expiry_date, user_id").eq("sub_id", sub_id).eq("status", "active").execute()
         if not sub_res.data:
-            await message.answer(reply_to_message_id=None, text="❌ Подписка для продления не найдена.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Подписка для продления не найдена.", reply_markup=main_keyboard(is_admin(user_id)))
             await state.clear()
             return
         if sub_res.data[0]["user_id"] != user_id:
-            await message.answer(reply_to_message_id=None, text="❌ Эта подписка не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Эта подписка не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
             await state.clear()
             return
         current_expiry = sub_res.data[0]["expiry_date"]
@@ -1686,7 +1692,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         await supabase.table("subscriptions").update({"expiry_date": new_expiry}).eq("sub_id", sub_id).execute()
         panel_updated = await extend_subscription_in_panel(sub_id, new_expiry)
         if not panel_updated:
-            await message.answer(reply_to_message_id=None, text="⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(admin_id, f"⚠️ Не удалось обновить expiryTime в панели для подписки {sub_id} (пользователь {user_id}). Проверьте логи.")
@@ -1695,9 +1701,8 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         await supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
         await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
         await message.answer(
-            reply_to_message_id=None,
-            text="✅ <b>Подписка успешно продлена!</b>\n\n"
-                 "Ваша защита активна. Приятного использования! 🚀",
+            "✅ <b>Подписка успешно продлена!</b>\n\n"
+            "Ваша защита активна. Приятного использования! 🚀",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
@@ -1706,10 +1711,9 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         if result:
             config_text = generate_config_for_connection(result)
             await message.answer(
-                reply_to_message_id=None,
-                text="🎉 <b>Оплата успешно подтверждена!</b>\n\n"
-                     f"{config_text}\n\n"
-                     "<i>Спасибо, что выбрали Gigabyte. Надёжная защита гарантирована.</i>",
+                "🎉 <b>Оплата успешно подтверждена!</b>\n\n"
+                f"{config_text}\n\n"
+                "<i>Спасибо, что выбрали Gigabyte. Надёжная защита гарантирована.</i>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=main_keyboard(is_admin(user_id))
             )
@@ -1729,7 +1733,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
                     )
                 except:
                     pass
-            await message.answer(reply_to_message_id=None, text="❌ Ошибка создания подписки. Администратор уведомлён.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Ошибка создания подписки. Администратор уведомлён.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
     await state.clear()
 
 @router.message(BuyStates.wait_crypto_hash)
@@ -1748,7 +1752,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     conf_res = await supabase.table("pending_confirmations").select("*").eq("user_id", user_id).in_("confirm_type", ["stars", "extend_stars"]).order("created_at", desc=True).limit(1).execute()
     if not conf_res.data:
-        await message.answer(reply_to_message_id=None, text="❌ Не найден ожидающий платёж.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Не найден ожидающий платёж.", reply_markup=main_keyboard(is_admin(user_id)))
         return
     row = conf_res.data[0]
     payment_id = row["payment_id"]
@@ -1766,18 +1770,18 @@ async def successful_payment_handler(message: Message, state: FSMContext):
         sub_id = data.get("sub_id")
         sub_res = await supabase.table("subscriptions").select("expiry_date, user_id").eq("sub_id", sub_id).eq("status", "active").execute()
         if not sub_res.data:
-            await message.answer(reply_to_message_id=None, text="❌ Подписка для продления не найдена.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Подписка для продления не найдена.", reply_markup=main_keyboard(is_admin(user_id)))
             await state.clear()
             return
         if sub_res.data[0]["user_id"] != user_id:
-            await message.answer(reply_to_message_id=None, text="❌ Эта подписка не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Эта подписка не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
             await state.clear()
             return
         new_expiry = sub_res.data[0]["expiry_date"] + days * 24 * 3600 * 1000
         await supabase.table("subscriptions").update({"expiry_date": new_expiry}).eq("sub_id", sub_id).execute()
         panel_updated = await extend_subscription_in_panel(sub_id, new_expiry)
         if not panel_updated:
-            await message.answer(reply_to_message_id=None, text="⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(admin_id, f"⚠️ Не удалось обновить expiryTime в панели для подписки {sub_id} (пользователь {user_id}) при оплате Stars. Проверьте логи.")
@@ -1785,7 +1789,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
                     pass
         await supabase.table("payments").update({"status": "completed", "tx_hash": message.successful_payment.provider_payment_charge_id}).eq("id", payment_id).execute()
         await supabase.table("pending_confirmations").delete().eq("user_id", user_id).execute()
-        await message.answer(reply_to_message_id=None, text="✅ <b>Подписка успешно продлена!</b>\n\nВаша защита активна.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("✅ <b>Подписка успешно продлена!</b>\n\nВаша защита активна.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
     else:
         result = await create_subscription(user_id, data["server"], data["months"], data["rub"], payment_id)
         if result:
@@ -1793,10 +1797,9 @@ async def successful_payment_handler(message: Message, state: FSMContext):
             await supabase.table("payments").update({"status": "completed", "tx_hash": message.successful_payment.provider_payment_charge_id}).eq("id", payment_id).execute()
             await supabase.table("pending_confirmations").delete().eq("user_id", user_id).execute()
             await message.answer(
-                reply_to_message_id=None,
-                text="🎉 <b>Оплата Telegram Stars подтверждена!</b>\n\n"
-                     f"{config_text}\n\n"
-                     "<i>Спасибо, что выбрали Gigabyte!</i>",
+                "🎉 <b>Оплата Telegram Stars подтверждена!</b>\n\n"
+                f"{config_text}\n\n"
+                "<i>Спасибо, что выбрали Gigabyte!</i>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=main_keyboard(is_admin(user_id))
             )
@@ -1815,7 +1818,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
                     )
                 except:
                     pass
-            await message.answer(reply_to_message_id=None, text="❌ Ошибка создания подписки. Администратор уведомлён.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("❌ Ошибка создания подписки. Администратор уведомлён.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
     await state.clear()
 
 # ====================== АКТИВАЦИЯ КЛЮЧА ======================
@@ -1823,11 +1826,10 @@ async def successful_payment_handler(message: Message, state: FSMContext):
 async def activate_key_start(message: Message, state: FSMContext):
     await state.set_state(ActivateKeyStates.waiting_code)
     await message.answer(
-        reply_to_message_id=None,
-        text="🔑 <b>Активация промокода</b>\n\n"
-             "Введите промокод в формате:\n"
-             "<code>GIFT-ABCD1234EFGH5678</code>\n\n"
-             "Промокод можно получить у администратора или в рамках акций.",
+        "🔑 <b>Активация промокода</b>\n\n"
+        "Введите промокод в формате:\n"
+        "<code>GIFT-ABCD1234EFGH5678</code>\n\n"
+        "Промокод можно получить у администратора или в рамках акций.",
         parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(is_admin(message.from_user.id))
     )
@@ -1839,19 +1841,19 @@ async def process_activate_key(message: Message, state: FSMContext):
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     key_res = await supabase.table("promo_keys").select("months, used").eq("code", code).execute()
     if not key_res.data:
-        await message.answer(reply_to_message_id=None, text="❌ Неверный или несуществующий ключ.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Неверный или несуществующий ключ.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
     months = key_res.data[0]["months"]
     used = key_res.data[0]["used"]
     if used:
-        await message.answer(reply_to_message_id=None, text="❌ Этот ключ уже был использован.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Этот ключ уже был использован.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
 
     servers = await load_servers_from_supabase()
     if not servers:
-        await message.answer(reply_to_message_id=None, text="❌ Нет доступных серверов.")
+        await message.answer("❌ Нет доступных серверов.")
         await state.clear()
         return
     server = servers[0]
@@ -1863,15 +1865,14 @@ async def process_activate_key(message: Message, state: FSMContext):
         config_text = generate_config_for_connection(result)
         label = "бессрочно" if months == -1 else TARIFFS.get(months, {}).get("label", f"{months} мес")
         await message.answer(
-            reply_to_message_id=None,
-            text=f"🎉 <b>Ключ успешно активирован!</b>\n\n"
-                 f"{config_text}\n\n"
-                 f"<i>Срок действия: {label}</i>",
+            f"🎉 <b>Ключ успешно активирован!</b>\n\n"
+            f"{config_text}\n\n"
+            f"<i>Срок действия: {label}</i>",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
     else:
-        await message.answer(reply_to_message_id=None, text="❌ Ошибка активации ключа. Обратитесь в поддержку.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Ошибка активации ключа. Обратитесь в поддержку.", reply_markup=main_keyboard(is_admin(user_id)))
     await state.clear()
 
 # ====================== ГЕНЕРАЦИЯ КЛЮЧЕЙ АДМИНОМ ======================
@@ -1880,7 +1881,7 @@ async def admin_generate_key_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.set_state(AdminGenerateKeyStates.waiting_months)
-    await message.answer(reply_to_message_id=None, text="🎫 <b>Выберите срок действия ключа</b>", parse_mode=ParseMode.HTML, reply_markup=promo_months_keyboard())
+    await message.answer("🎫 <b>Выберите срок действия ключа</b>", parse_mode=ParseMode.HTML, reply_markup=promo_months_keyboard())
 
 @router.callback_query(lambda c: c.data.startswith("promo_") and not c.data.startswith("promo_server_"))
 async def admin_generate_key_callback(callback: CallbackQuery, state: FSMContext):
@@ -1949,7 +1950,7 @@ async def admin_list_keys(message: Message):
         return
     res = await supabase.table("promo_keys").select("code, months, used, used_by, created_at").order("created_at", desc=True).limit(20).execute()
     if not res.data:
-        await message.answer(reply_to_message_id=None, text="Нет сгенерированных ключей.", reply_markup=main_keyboard(True))
+        await message.answer("Нет сгенерированных ключей.", reply_markup=main_keyboard(True))
         return
     text = "🔑 <b>Последние ключи:</b>\n\n"
     for k in res.data:
@@ -1971,7 +1972,7 @@ async def admin_list_keys(message: Message):
         else:
             months_str = f"{months} мес"
         text += f"📌 <code>{k['code']}</code> | {months_str} | {status}\n"
-    await message.answer(reply_to_message_id=None, text=text[:4000], parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
+    await message.answer(text[:4000], parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
 
 # ====================== ЛИЧНЫЙ КАБИНЕТ ======================
 async def cabinet_entry(message: Message):
@@ -1980,7 +1981,7 @@ async def cabinet_entry(message: Message):
         [InlineKeyboardButton(text="⏳ Ожидающие платежи", callback_data="cabinet_pending"),
          InlineKeyboardButton(text="📜 История платежей", callback_data="cabinet_history")]
     ])
-    await message.answer(reply_to_message_id=None, text="👤 <b>Личный кабинет</b>\n\nВыберите раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("👤 <b>Личный кабинет</b>\n\nВыберите раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.message(F.text == "👤 Личный кабинет")
 async def cabinet(message: Message):
@@ -2006,7 +2007,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
             expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y %H:%M")
             text = f"🌍 <b>{server['name']}</b>\n📅 Действует до: <code>{expiry}</code>\n🆔 <code>{sub['sub_id']}</code>\n\n📡 <b>Ваша ссылка на подписку:</b>\n<code>{generate_subscription_link(server, sub['sub_id'])}</code>"
             kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔄 Продлить подписку", callback_data=f"extend_{sub['sub_id']}")]])
-            await callback.message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            await callback.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
         await callback.answer()
     elif section == "pending":
         pending = await supabase.table("payments").select("id, payment_uid, amount_rub, currency, method, created_at, status").eq("user_id", user_id).in_("status", ["pending_crypto", "awaiting_hash", "pending_stars"]).execute()
@@ -2028,7 +2029,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text="📎 Отправить хеш", callback_data=f"resend_hash_{p['id']}") if p["status"] != "pending_stars" else InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data=f"retry_stars_{p['id']}"),
                  InlineKeyboardButton(text="❌ Удалить", callback_data=f"delete_payment_{p['id']}")]
             ])
-            await callback.message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            await callback.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
         await callback.answer()
     elif section == "history":
         hist = await supabase.table("payments").select("payment_uid, amount_rub, amount_usd, method, currency, status, created_at").eq("user_id", user_id).eq("status", "completed").order("created_at", desc=True).execute()
@@ -2049,7 +2050,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
             text += f"💳 Способ: {method_map.get(p['method'], p['method'].upper())}\n"
             text += f"📅 Дата: {dt_str}\n"
             text += f"📊 Статус: ✅ Завершён"
-            await callback.message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML)
+            await callback.message.answer(text, parse_mode=ParseMode.HTML)
         await callback.answer()
 
 # ====================== ПОВТОРНАЯ ОТПРАВКА ХЕША ======================
@@ -2067,13 +2068,12 @@ async def resend_hash_callback(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ResendHashState.waiting_hash)
     kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
     await callback.message.answer(
-        reply_to_message_id=None,
-        text="📎 <b>Отправьте TXID (хеш транзакции)</b>\n\n"
-             "📍 <b>Где взять TXID?</b>\n"
-             "• В вашем криптокошельке после отправки\n"
-             "• В обозревателе Arbitrum (arbiscan.io)\n\n"
-             "📝 <b>Пример хеша:</b>\n"
-             "<code>0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb4a1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0</code>",
+        "📎 <b>Отправьте TXID (хеш транзакции)</b>\n\n"
+        "📍 <b>Где взять TXID?</b>\n"
+        "• В вашем криптокошельке после отправки\n"
+        "• В обозревателе Arbitrum (arbiscan.io)\n\n"
+        "📝 <b>Пример хеша:</b>\n"
+        "<code>0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb4a1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0</code>",
         parse_mode=ParseMode.HTML,
         reply_markup=kb
     )
@@ -2096,7 +2096,7 @@ async def retry_stars_payment(callback: CallbackQuery, state: FSMContext):
     data = json.loads(conf.data[0]["data"])
     stars = data["stars"]
     if stars <= 0:
-        await callback.message.answer(reply_to_message_id=None, text="❌ Ошибка: сумма оплаты равна 0. Попробуйте другой тариф.")
+        await callback.message.answer("❌ Ошибка: сумма оплаты равна 0. Попробуйте другой тариф.")
         await callback.answer()
         return
     is_extend = data.get("sub_id") is not None
@@ -2125,9 +2125,8 @@ async def process_resend_hash(message: Message, state: FSMContext):
     tx_hash = message.text.strip()
     if len(tx_hash) < 64 or not tx_hash.startswith("0x"):
         await message.answer(
-            reply_to_message_id=None,
-            text="❌ <b>Неверный формат TXID</b>\n\n"
-                 "Хеш должен начинаться с 0x и содержать 66 символов.",
+            "❌ <b>Неверный формат TXID</b>\n\n"
+            "Хеш должен начинаться с 0x и содержать 66 символов.",
             parse_mode=ParseMode.HTML,
             reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True)
         )
@@ -2137,23 +2136,23 @@ async def process_resend_hash(message: Message, state: FSMContext):
     user_id = message.from_user.id
     pay = await supabase.table("payments").select("amount_usd, currency, status").eq("id", payment_id).eq("user_id", user_id).execute()
     if not pay.data or pay.data[0]["status"] not in ("pending_crypto", "awaiting_hash"):
-        await message.answer(reply_to_message_id=None, text="❌ Платёж уже обработан.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Платёж уже обработан.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
     expected_usd = pay.data[0]["amount_usd"]
     currency = pay.data[0]["currency"]
     await supabase.table("payments").update({"status": "awaiting_hash"}).eq("id", payment_id).execute()
-    waiting_msg = await message.answer(reply_to_message_id=None, text="⏳ Проверяем транзакцию...")
+    waiting_msg = await message.answer("⏳ Проверяем транзакцию...")
     success, reason = await verify_arbitrum_tx(tx_hash, currency, expected_usd)
     await waiting_msg.delete()
     if not success:
         await supabase.table("payments").update({"status": "pending_crypto"}).eq("id", payment_id).execute()
-        await message.answer(reply_to_message_id=None, text=f"❌ {reason}\n\nПопробуйте снова.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer(f"❌ {reason}\n\nПопробуйте снова.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
     dup = await supabase.table("payments").select("id").eq("tx_hash", tx_hash).execute()
     if dup.data:
-        await message.answer(reply_to_message_id=None, text="❌ Этот TXID уже использован.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("❌ Этот TXID уже использован.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
     await supabase.table("payments").update({"tx_hash": tx_hash, "status": "confirmed"}).eq("id", payment_id).execute()
@@ -2167,31 +2166,31 @@ async def process_resend_hash(message: Message, state: FSMContext):
             days = int(months * 30)
             sub_res = await supabase.table("subscriptions").select("expiry_date, user_id").eq("sub_id", sub_id).eq("status", "active").execute()
             if not sub_res.data or sub_res.data[0]["user_id"] != user_id:
-                await message.answer(reply_to_message_id=None, text="❌ Подписка не найдена или не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
+                await message.answer("❌ Подписка не найдена или не принадлежит вам.", reply_markup=main_keyboard(is_admin(user_id)))
                 await state.clear()
                 return
             new_expiry = sub_res.data[0]["expiry_date"] + days * 24 * 3600 * 1000
             await supabase.table("subscriptions").update({"expiry_date": new_expiry}).eq("sub_id", sub_id).execute()
             panel_updated = await extend_subscription_in_panel(sub_id, new_expiry)
             if not panel_updated:
-                await message.answer(reply_to_message_id=None, text="⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
+                await message.answer("⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён.", reply_markup=main_keyboard(is_admin(user_id)))
                 for admin_id in ADMIN_IDS:
                     try:
                         await bot.send_message(admin_id, f"⚠️ Не удалось обновить expiryTime в панели для подписки {sub_id} (пользователь {user_id}) при повторной отправке хеша.")
                     except:
                         pass
             await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
-            await message.answer(reply_to_message_id=None, text="✅ <b>Подписка успешно продлена!</b>", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
+            await message.answer("✅ <b>Подписка успешно продлена!</b>", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
         else:
             result = await create_subscription(user_id, pay_data["server"], pay_data["months"], pay_data["rub"], payment_id)
             if result:
                 config_text = generate_config_for_connection(result)
-                await message.answer(reply_to_message_id=None, text=f"🎉 <b>Оплата подтверждена!</b>\n\n{config_text}", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
+                await message.answer(f"🎉 <b>Оплата подтверждена!</b>\n\n{config_text}", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(user_id)))
             else:
-                await message.answer(reply_to_message_id=None, text="❌ Ошибка создания подписки.", reply_markup=main_keyboard(is_admin(user_id)))
+                await message.answer("❌ Ошибка создания подписки.", reply_markup=main_keyboard(is_admin(user_id)))
     else:
         await supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
-        await message.answer(reply_to_message_id=None, text="✅ Платёж подтверждён, но подписка не была создана автоматически. Обратитесь в поддержку.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer("✅ Платёж подтверждён, но подписка не была создана автоматически. Обратитесь в поддержку.", reply_markup=main_keyboard(is_admin(user_id)))
     await state.clear()
 
 @router.callback_query(lambda c: c.data.startswith("delete_payment_"))
@@ -2225,7 +2224,7 @@ async def instructions_os(message: Message):
         [InlineKeyboardButton(text="📱 Android", callback_data="os_android"), InlineKeyboardButton(text="🍏 iOS", callback_data="os_ios")],
         [InlineKeyboardButton(text="💻 Windows", callback_data="os_windows"), InlineKeyboardButton(text="🍎 Mac", callback_data="os_mac")]
     ])
-    await message.answer(reply_to_message_id=None, text="📱 <b>Выберите вашу операционную систему</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("📱 <b>Выберите вашу операционную систему</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.callback_query(lambda c: c.data.startswith("os_"))
 async def os_instructions_callback(callback: CallbackQuery):
@@ -2287,7 +2286,7 @@ async def os_instructions_callback(callback: CallbackQuery):
     }
 
     caption = texts.get(os_type, "Инструкция в разработке")
-    await callback.message.answer(reply_to_message_id=None, text=caption, parse_mode=ParseMode.HTML, disable_web_page_preview=False)
+    await callback.message.answer(caption, parse_mode=ParseMode.HTML, disable_web_page_preview=False)
     await callback.answer()
 
 # ====================== ПОДДЕРЖКА (ТИКЕТЫ) ======================
@@ -2295,7 +2294,7 @@ async def os_instructions_callback(callback: CallbackQuery):
 async def support_start(message: Message, state: FSMContext):
     await ensure_user_exists_supabase(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.set_state(TicketStates.waiting_question)
-    await message.answer(reply_to_message_id=None, text="✍️ <b>Опишите вашу проблему</b>\n\nМы ответим в ближайшее время.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(message.from_user.id)))
+    await message.answer("✍️ <b>Опишите вашу проблему</b>\n\nМы ответим в ближайшее время.", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 @router.message(TicketStates.waiting_question)
 async def save_ticket(message: Message, state: FSMContext):
@@ -2320,7 +2319,7 @@ async def save_ticket(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"ticket_reply_{ticket_id}"),
          InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"ticket_close_{ticket_id}")]
     ])
-    await message.answer(reply_to_message_id=None, text=f"✅ <b>Тикет <code>{ticket_id}</code> создан</b>\n\nВы можете отправить дополнительные сообщения или закрыть тикет.", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer(f"✅ <b>Тикет <code>{ticket_id}</code> создан</b>\n\nВы можете отправить дополнительные сообщения или закрыть тикет.", parse_mode=ParseMode.HTML, reply_markup=kb)
     user_display = get_user_display(message.from_user)
     for admin_id in ADMIN_IDS:
         admin_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -2339,7 +2338,7 @@ async def ticket_reply_callback(callback: CallbackQuery, state: FSMContext):
         return
     await state.update_data(ticket_id=ticket_id)
     await state.set_state(TicketStates.waiting_reply)
-    await callback.message.answer(reply_to_message_id=None, text="✏️ Введите ваш ответ:")
+    await callback.message.answer("✏️ Введите ваш ответ:")
     await callback.answer()
 
 @router.message(TicketStates.waiting_reply)
@@ -2347,7 +2346,7 @@ async def process_ticket_reply(message: Message, state: FSMContext):
     data = await state.get_data()
     ticket_id = data.get("ticket_id")
     if not ticket_id:
-        await message.answer(reply_to_message_id=None, text="Ошибка: тикет не найден.")
+        await message.answer("Ошибка: тикет не найден.")
         await state.clear()
         return
     sender_id = message.from_user.id
@@ -2363,7 +2362,7 @@ async def process_ticket_reply(message: Message, state: FSMContext):
     }).execute()
     ticket = await supabase.table("tickets").select("user_id").eq("ticket_id", ticket_id).execute()
     if not ticket.data:
-        await message.answer(reply_to_message_id=None, text="Ошибка: тикет не найден.")
+        await message.answer("Ошибка: тикет не найден.")
         await state.clear()
         return
     user_id = ticket.data[0]["user_id"]
@@ -2371,14 +2370,14 @@ async def process_ticket_reply(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"ticket_reply_{ticket_id}"),
          InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"ticket_close_{ticket_id}")]
     ])
-    user_display = get_user_identifier(user_id, message.from_user.username, message.from_user.full_name)
+    user_display = get_user_identifier_by_data(message.from_user.username, message.from_user.full_name, message.from_user.id)
     if is_admin_sender:
         await bot.send_message(user_id, f"📬 <b>Ответ на тикет <code>{ticket_id}</code></b>\n\n{reply_text}", parse_mode=ParseMode.HTML, reply_markup=kb)
-        await message.answer(reply_to_message_id=None, text="✅ Ваш ответ отправлен пользователю.")
+        await message.answer("✅ Ваш ответ отправлен пользователю.")
     else:
         for admin_id in ADMIN_IDS:
             await bot.send_message(admin_id, f"📬 <b>Новое сообщение в тикете <code>{ticket_id}</code></b>\nОт: {user_display}\n\n{reply_text}", parse_mode=ParseMode.HTML, reply_markup=kb)
-        await message.answer(reply_to_message_id=None, text="✅ Ваше сообщение отправлено администраторам.")
+        await message.answer("✅ Ваше сообщение отправлено администраторам.")
     await state.clear()
 
 @router.callback_query(lambda c: c.data.startswith("ticket_close_"))
@@ -2396,7 +2395,7 @@ async def ticket_close_callback(callback: CallbackQuery):
 async def request_country(message: Message, state: FSMContext):
     await ensure_user_exists_supabase(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.set_state(CountryRequestStates.waiting_country)
-    await message.answer(reply_to_message_id=None, text="🌏 <b>Выберите страну или напишите свою</b>", parse_mode=ParseMode.HTML, reply_markup=country_keyboard())
+    await message.answer("🌏 <b>Выберите страну или напишите свою</b>", parse_mode=ParseMode.HTML, reply_markup=country_keyboard())
 
 @router.callback_query(lambda c: c.data.startswith("country_"))
 async def country_callback(callback: CallbackQuery, state: FSMContext):
@@ -2433,7 +2432,7 @@ async def custom_country(message: Message, state: FSMContext):
         "created_at": datetime.now().isoformat(),
         "request_id": request_id
     }).execute()
-    await message.answer(reply_to_message_id=None, text="✅ Запрос отправлен! Спасибо.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+    await message.answer("✅ Запрос отправлен! Спасибо.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
     user_display = get_user_display(message.from_user)
     for admin_id in ADMIN_IDS:
         admin_kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✏️ Ответить", callback_data=f"country_reply_{request_id}")]])
@@ -2449,7 +2448,7 @@ async def country_reply_callback(callback: CallbackQuery, state: FSMContext):
         return
     await state.update_data(request_id=request_id, user_id=req.data[0]["user_id"])
     await state.set_state(AdminCountryReplyStates.waiting_reply_text)
-    await callback.message.answer(reply_to_message_id=None, text="✏️ Введите ответ для пользователя:")
+    await callback.message.answer("✏️ Введите ответ для пользователя:")
     await callback.answer()
 
 @router.message(AdminCountryReplyStates.waiting_reply_text)
@@ -2462,7 +2461,7 @@ async def process_country_reply(message: Message, state: FSMContext):
     reply_text = message.text
     await supabase.table("country_requests").update({"status": "closed"}).eq("request_id", request_id).execute()
     await bot.send_message(user_id, f"📬 <b>Ответ на запрос новой страны</b>\n\n{reply_text}", parse_mode=ParseMode.HTML)
-    await message.answer(reply_to_message_id=None, text="✅ Ответ отправлен пользователю.", reply_markup=main_keyboard(True))
+    await message.answer("✅ Ответ отправлен пользователю.", reply_markup=main_keyboard(True))
     await state.clear()
 
 # ====================== УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (АДМИН) ======================
@@ -2470,10 +2469,9 @@ async def process_country_reply(message: Message, state: FSMContext):
 async def admin_users_list(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await init_supabase()  # гарантия инициализации
     users = await supabase.table("users").select("user_id, username, full_name, created_at").order("created_at", desc=True).execute()
     if not users.data:
-        await message.answer(reply_to_message_id=None, text="Нет пользователей.", reply_markup=main_keyboard(True))
+        await message.answer("Нет пользователей.", reply_markup=main_keyboard(True))
         return
     for u in users.data:
         uid = u["user_id"]
@@ -2506,8 +2504,8 @@ async def admin_users_list(message: Message):
                 status_icon = "✅" if p["status"] == "completed" else "⏳"
                 text += f"  • {dt}: {p['amount_rub']:.0f} ₽ ({p['method']}) {status_icon}\n"
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🗑 Удалить пользователя", callback_data=f"delete_user_{uid}")]])
-        await message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
-    await message.answer(reply_to_message_id=None, text="Показаны все пользователи.", reply_markup=main_keyboard(True))
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("Показаны все пользователи.", reply_markup=main_keyboard(True))
 
 @router.callback_query(lambda c: c.data.startswith("delete_user_"))
 async def delete_user_callback(callback: CallbackQuery):
@@ -2540,12 +2538,12 @@ async def delete_user_callback(callback: CallbackQuery):
 async def user_delete_self(message: Message):
     user_id = message.from_user.id
     if is_admin(user_id):
-        await message.answer(reply_to_message_id=None, text="❌ Администратор не может удалить себя через эту кнопку.", reply_markup=main_keyboard(True))
+        await message.answer("❌ Администратор не может удалить себя через эту кнопку.", reply_markup=main_keyboard(True))
         return
 
     user_res = await supabase.table("users").select("*").eq("user_id", user_id).execute()
     if not user_res.data:
-        await message.answer(reply_to_message_id=None, text="❌ Пользователь не найден.")
+        await message.answer("❌ Пользователь не найден.")
         return
     user_info = user_res.data[0]
     subs = await supabase.table("subscriptions").select("*").eq("user_id", user_id).execute()
@@ -2574,7 +2572,7 @@ async def user_delete_self(message: Message):
         [InlineKeyboardButton(text="✅ Да, удалить навсегда", callback_data="confirm_self_delete"),
          InlineKeyboardButton(text="❌ Нет, отмена", callback_data="cancel_self_delete")]
     ])
-    await message.answer(reply_to_message_id=None, text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.callback_query(lambda c: c.data == "confirm_self_delete")
 async def confirm_self_delete(callback: CallbackQuery):
@@ -2615,7 +2613,7 @@ async def confirm_self_delete(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "cancel_self_delete")
 async def cancel_self_delete(callback: CallbackQuery):
     await callback.message.edit_text("❌ Удаление аккаунта отменено.")
-    await callback.message.answer(reply_to_message_id=None, text="👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
+    await callback.message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
 # ====================== АДМИН-ПАНЕЛЬ ======================
@@ -2623,14 +2621,14 @@ async def cancel_self_delete(callback: CallbackQuery):
 async def admin_show_rates(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer(reply_to_message_id=None, text=await price_manager.get_rates_info(), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
+    await message.answer(await price_manager.get_rates_info(), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
 
 @router.message(F.text == "💰 Изменить цены")
 async def admin_edit_prices(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.set_state(AdminPriceStates.waiting_action)
-    await message.answer(reply_to_message_id=None, text="💰 <b>Редактирование цен</b>\n\nВыберите действие:", parse_mode=ParseMode.HTML, reply_markup=price_percent_keyboard())
+    await message.answer("💰 <b>Редактирование цен</b>\n\nВыберите действие:", parse_mode=ParseMode.HTML, reply_markup=price_percent_keyboard())
 
 @router.message(AdminPriceStates.waiting_action)
 async def save_new_prices(message: Message, state: FSMContext):
@@ -2648,13 +2646,12 @@ async def save_new_prices(message: Message, state: FSMContext):
                 await supabase.table("tariffs").update({"rub": new_rub}).eq("months", t["months"]).execute()
         elif message.text == "✏️ Ввести вручную":
             await message.answer(
-                reply_to_message_id=None,
-                text="💰 <b>Введите цену за 1 месяц</b>\n\n"
-                     "Введите одно число — цену в рублях за <b>1 месяц</b>. Остальные тарифы будут рассчитаны автоматически:\n"
-                     "• 3 месяца = цена месяца × 2.5\n"
-                     "• 6 месяцев = цена месяца × 4.5\n"
-                     "• 1 год = цена месяца × 8.5\n\n"
-                     "Пример: <code>290</code>",
+                "💰 <b>Введите цену за 1 месяц</b>\n\n"
+                "Введите одно число — цену в рублях за <b>1 месяц</b>. Остальные тарифы будут рассчитаны автоматически:\n"
+                "• 3 месяца = цена месяца × 2.5\n"
+                "• 6 месяцев = цена месяца × 4.5\n"
+                "• 1 год = цена месяца × 8.5\n\n"
+                "Пример: <code>290</code>",
                 parse_mode=ParseMode.HTML
             )
             await state.set_state(AdminPriceStates.waiting_manual_input)
@@ -2687,9 +2684,9 @@ async def save_new_prices(message: Message, state: FSMContext):
                         else:
                             await supabase.table("tariffs").insert({"months": months, "rub": rub}).execute()
         await load_tariffs()
-        await message.answer(reply_to_message_id=None, text="✅ <b>Цены успешно обновлены!</b>", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
+        await message.answer("✅ <b>Цены успешно обновлены!</b>", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
-        await message.answer(reply_to_message_id=None, text=f"❌ Ошибка: {e}", reply_markup=price_percent_keyboard())
+        await message.answer(f"❌ Ошибка: {e}", reply_markup=price_percent_keyboard())
     await state.clear()
 
 @router.message(AdminPriceStates.waiting_manual_input)
@@ -2701,7 +2698,7 @@ async def admin_broadcast(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.set_state(AdminBroadcastStates.waiting_message)
-    await message.answer(reply_to_message_id=None, text="📢 <b>Создание рассылки</b>\n\nВведите текст сообщения для рассылки всем пользователям:", parse_mode=ParseMode.HTML)
+    await message.answer("📢 <b>Создание рассылки</b>\n\nВведите текст сообщения для рассылки всем пользователям:", parse_mode=ParseMode.HTML)
 
 @router.message(AdminBroadcastStates.waiting_message)
 async def admin_do_broadcast(message: Message, state: FSMContext):
@@ -2719,7 +2716,7 @@ async def admin_do_broadcast(message: Message, state: FSMContext):
             await asyncio.sleep(0.05)
         except:
             pass
-    await message.answer(reply_to_message_id=None, text=f"✅ <b>Рассылка завершена</b>\n\n📨 Отправлено: {count} пользователям", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
+    await message.answer(f"✅ <b>Рассылка завершена</b>\n\n📨 Отправлено: {count} пользователям", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     await state.clear()
 
 @router.message(F.text == "📊 Статистика")
@@ -2733,14 +2730,13 @@ async def admin_stats(message: Message):
     pending_cnt = await supabase.table("payments").select("*", count="exact").in_("status", ["pending_crypto", "awaiting_hash", "pending_stars"]).execute()
     tickets_cnt = await supabase.table("tickets").select("*", count="exact").eq("status", "open").execute()
     await message.answer(
-        reply_to_message_id=None,
-        text=f"📊 <b>Статистика Gigabyte</b>\n\n"
-             f"👥 <b>Пользователей:</b> {users_cnt.count}\n"
-             f"✅ <b>Активных подписок:</b> {active_cnt.count}\n"
-             f"💰 <b>Общая выручка:</b> {total_rev:.0f} ₽\n"
-             f"⏳ <b>Ожидающих платежей:</b> {pending_cnt.count}\n"
-             f"🎫 <b>Открытых тикетов:</b> {tickets_cnt.count}\n\n"
-             f"<i>Актуально на {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>",
+        f"📊 <b>Статистика Gigabyte</b>\n\n"
+        f"👥 <b>Пользователей:</b> {users_cnt.count}\n"
+        f"✅ <b>Активных подписок:</b> {active_cnt.count}\n"
+        f"💰 <b>Общая выручка:</b> {total_rev:.0f} ₽\n"
+        f"⏳ <b>Ожидающих платежей:</b> {pending_cnt.count}\n"
+        f"🎫 <b>Открытых тикетов:</b> {tickets_cnt.count}\n\n"
+        f"<i>Актуально на {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>",
         parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(True)
     )
@@ -2750,7 +2746,7 @@ async def admin_create_subscription_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.set_state(AdminCreateSubStates.waiting_user_id)
-    await message.answer(reply_to_message_id=None, text="👤 <b>Создание подписки</b>\n\nВведите Telegram ID пользователя:", parse_mode=ParseMode.HTML)
+    await message.answer("👤 <b>Создание подписки</b>\n\nВведите Telegram ID пользователя:", parse_mode=ParseMode.HTML)
 
 @router.message(AdminCreateSubStates.waiting_user_id)
 async def admin_create_subscription_get_user(message: Message, state: FSMContext):
@@ -2759,20 +2755,20 @@ async def admin_create_subscription_get_user(message: Message, state: FSMContext
     try:
         uid = int(message.text.strip())
     except:
-        await message.answer(reply_to_message_id=None, text="❌ Неверный user_id. Введите числовой ID.")
+        await message.answer("❌ Неверный user_id. Введите числовой ID.")
         return
     user = await supabase.table("users").select("user_id").eq("user_id", uid).execute()
     if not user.data:
-        await message.answer(reply_to_message_id=None, text="❌ Пользователь не найден в базе.")
+        await message.answer("❌ Пользователь не найден в базе.")
         return
     await state.update_data(target_user_id=uid)
 
     servers = await load_servers_from_supabase()
     if not servers:
-        await message.answer(reply_to_message_id=None, text="❌ Нет доступных серверов.")
+        await message.answer("❌ Нет доступных серверов.")
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=s["name"], callback_data=f"adminsub_server_{s['id']}")] for s in servers])
-    await message.answer(reply_to_message_id=None, text="🌍 <b>Выберите сервер для подписки</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("🌍 <b>Выберите сервер для подписки</b>", parse_mode=ParseMode.HTML, reply_markup=kb)
     await state.set_state(AdminCreateSubStates.select_server)
 
 @router.callback_query(lambda c: c.data.startswith("adminsub_server_"), AdminCreateSubStates.select_server)
@@ -2795,7 +2791,7 @@ async def admin_tickets_list(message: Message):
         return
     tickets = await supabase.table("tickets").select("ticket_id, user_id").eq("status", "open").order("id", desc=True).execute()
     if not tickets.data:
-        await message.answer(reply_to_message_id=None, text="📭 Нет открытых тикетов.", reply_markup=main_keyboard(True))
+        await message.answer("📭 Нет открытых тикетов.", reply_markup=main_keyboard(True))
         return
     for t in tickets.data:
         ticket_id = t["ticket_id"]
@@ -2809,8 +2805,8 @@ async def admin_tickets_list(message: Message):
             [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"ticket_reply_{ticket_id}"),
              InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"ticket_close_{ticket_id}")]
         ])
-        await message.answer(reply_to_message_id=None, text=f"🎫 <b><code>{ticket_id}</code></b>\n👤 От: {user_identifier}\n\n📝 {first_msg[:300]}", parse_mode=ParseMode.HTML, reply_markup=kb)
-    await message.answer(reply_to_message_id=None, text="Все открытые тикеты показаны выше.", reply_markup=main_keyboard(True))
+        await message.answer(f"🎫 <b><code>{ticket_id}</code></b>\n👤 От: {user_identifier}\n\n📝 {first_msg[:300]}", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("Все открытые тикеты показаны выше.", reply_markup=main_keyboard(True))
 
 @router.message(F.text == "🌍 Запросы на новую страну")
 async def admin_country_requests(message: Message):
@@ -2818,33 +2814,33 @@ async def admin_country_requests(message: Message):
         return
     reqs = await supabase.table("country_requests").select("request_id, user_id, country").eq("status", "open").order("id", desc=True).execute()
     if not reqs.data:
-        await message.answer(reply_to_message_id=None, text="🌍 Нет открытых запросов на новые страны.", reply_markup=main_keyboard(True))
+        await message.answer("🌍 Нет открытых запросов на новые страны.", reply_markup=main_keyboard(True))
         return
     for r in reqs.data:
         user = await supabase.table("users").select("username, full_name").eq("user_id", r["user_id"]).execute()
         u = user.data[0] if user.data else {}
         user_identifier = get_user_identifier(r["user_id"], u.get("username"), u.get("full_name"))
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✏️ Ответить", callback_data=f"country_reply_{r['request_id']}")]])
-        await message.answer(reply_to_message_id=None, text=f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {r['country']}\n🆔 <code>{r['request_id']}</code>", parse_mode=ParseMode.HTML, reply_markup=kb)
-    await message.answer(reply_to_message_id=None, text="Все открытые запросы показаны выше.", reply_markup=main_keyboard(True))
+        await message.answer(f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {r['country']}\n🆔 <code>{r['request_id']}</code>", parse_mode=ParseMode.HTML, reply_markup=kb)
+    await message.answer("Все открытые запросы показаны выше.", reply_markup=main_keyboard(True))
 
 @router.message(F.text == "🔄 Синхронизировать серверы")
 async def cmd_sync_servers(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer(reply_to_message_id=None, text="⏳ Запускаю полную синхронизацию клиентов...")
+    await message.answer("⏳ Запускаю полную синхронизацию клиентов...")
     try:
         await sync_all_servers_with_supabase()
-        await message.answer(reply_to_message_id=None, text="✅ Синхронизация успешно завершена!")
+        await message.answer("✅ Синхронизация успешно завершена!")
     except Exception as e:
         logger.error(f"Ошибка синхронизации: {e}")
-        await message.answer(reply_to_message_id=None, text=f"❌ Ошибка синхронизации: {e}")
+        await message.answer(f"❌ Ошибка синхронизации: {e}")
 
 @router.message(F.text == "📥 Импорт клиентов из панели")
 async def cmd_force_import_clients(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer(reply_to_message_id=None, text="⏳ Запускаю импорт клиентов...")
+    await message.answer("⏳ Запускаю импорт клиентов...")
     await force_import_clients_from_panel(message)
 
 # ====================== УСТАНОВКА КОМАНД БОТА ======================
@@ -2866,22 +2862,19 @@ async def set_commands(bot: Bot):
 async def unknown_message(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state in (BuyStates.waiting_crypto_payment, ExtendSubscriptionStates.waiting_crypto_payment):
-        await message.answer(reply_to_message_id=None, text="Пожалуйста, используйте кнопки «✅ Я оплатил» или «❌ Отмена».")
+        await message.answer("Пожалуйста, используйте кнопки «✅ Я оплатил» или «❌ Отмена».")
         return
     if current_state in (BuyStates.wait_crypto_hash, ExtendSubscriptionStates.wait_crypto_hash, ResendHashState.waiting_hash):
-        await message.answer(reply_to_message_id=None, text="⏳ Ожидание хеша транзакции. Отправьте TXID или нажмите «❌ Отмена».")
-        return
-    # Игнорируем команды, начинающиеся с /, чтобы не дублировать ответы
-    if message.text and message.text.startswith("/"):
+        await message.answer("⏳ Ожидание хеша транзакции. Отправьте TXID или нажмите «❌ Отмена».")
         return
     if await state.get_state() is None:
-        await message.answer(reply_to_message_id=None, text="❓ Неизвестная команда. Используйте меню.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
+        await message.answer("❓ Неизвестная команда. Используйте меню.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 @router.errors()
 async def error_handler(event: ErrorEvent):
     logger.error(f"❌ Критическая ошибка: {event.exception}", exc_info=True)
 
-# ====================== ЗАПУСК ======================
+# ====================== ЗАПУСК (Webhook + Long Polling как fallback) ======================
 async def on_startup(bot: Bot):
     WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
     if not WEBHOOK_HOST:
@@ -2897,15 +2890,13 @@ async def on_shutdown(bot: Bot):
     logger.info("🔴 Webhook удалён")
 
 async def main():
-    # Инициализация Supabase при старте (важно для вебхука)
-    await init_supabase()
-
     WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
     WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080))
     WEBHOOK_PATH = "/webhook"
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
     if WEBHOOK_HOST:
+        # Режим вебхука (production)
         base_url = WEBHOOK_HOST.rstrip('/')
         dp.startup.register(on_startup)
         dp.shutdown.register(on_shutdown)
@@ -2920,8 +2911,10 @@ async def main():
         site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
         await site.start()
         logger.info(f"🚀 Бот запущен в режиме вебхука на {WEBHOOK_HOST}:{WEBHOOK_PORT}")
+        # Бесконечное ожидание
         await asyncio.Event().wait()
     else:
+        # Fallback: long polling
         logger.warning("WEBHOOK_HOST не задан, запускаем в режиме long polling")
         await dp.start_polling(bot)
 
