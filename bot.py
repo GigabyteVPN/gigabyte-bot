@@ -196,19 +196,23 @@ class PriceManager:
         return round(rub_amount, 2)
 
     async def get_rates_info(self) -> str:
-        await self.update_rates()
-        info = (
-            f"📈 <b>Актуальные курсы валют</b>\n\n"
-            f"🇷🇺 Курс USD/RUB (exchangerate.host): <b>{self.usd_cbr:.2f if self.usd_cbr else '—'}</b> ₽\n"
-            f"🌐 Рыночный (exchangerate-api): <b>{self.usd_market:.2f if self.usd_market else '—'}</b> ₽\n"
-            f"⭐ <b>Эффективный курс (средний): {self.usd_effective:.2f if self.usd_effective else '—'}</b> ₽\n"
-            f"₿ USDT/RUB (CoinGecko): <b>{self.usdt_p2p:.2f if self.usdt_p2p else '—'}</b> ₽\n"
-            f"💎 Stars/USD: 1 Star = ${self.stars_usd_rate:.3f}\n\n"
-            f"💰 Комиссия приёма крипты: +2%\n"
-            f"⭐ Комиссия вывода Stars: +15%\n\n"
-            f"<i>Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
-        )
-        return info
+    await self.update_rates()
+    cbr_str = f"{self.usd_cbr:.2f}" if self.usd_cbr is not None else "—"
+    market_str = f"{self.usd_market:.2f}" if self.usd_market is not None else "—"
+    effective_str = f"{self.usd_effective:.2f}" if self.usd_effective is not None else "—"
+    usdt_str = f"{self.usdt_p2p:.2f}" if self.usdt_p2p is not None else "—"
+    info = (
+        f"📈 <b>Актуальные курсы валют</b>\n\n"
+        f"🇷🇺 Курс USD/RUB (exchangerate.host): <b>{cbr_str}</b> ₽\n"
+        f"🌐 Рыночный (exchangerate-api): <b>{market_str}</b> ₽\n"
+        f"⭐ <b>Эффективный курс (средний): {effective_str}</b> ₽\n"
+        f"₿ USDT/RUB (CoinGecko): <b>{usdt_str}</b> ₽\n"
+        f"💎 Stars/USD: 1 Star = ${self.stars_usd_rate:.3f}\n\n"
+        f"💰 Комиссия приёма крипты: +2%\n"
+        f"⭐ Комиссия вывода Stars: +15%\n\n"
+        f"<i>Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
+    )
+    return info
 
 price_manager = PriceManager()
 
