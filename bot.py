@@ -156,7 +156,6 @@ class PriceManager:
         elif market_rate:
             self.usd_effective = market_rate
         else:
-            # Если не удалось получить ни одного курса, используем последнее известное значение
             if self.usd_effective is None:
                 self.usd_effective = 90.0
             logger.warning("Не удалось получить актуальные курсы, используется предыдущее значение")
@@ -172,7 +171,6 @@ class PriceManager:
                         self.usdt_p2p = float(rate)
         except Exception as e:
             logger.warning(f"Ошибка получения курса USDT/RUB: {e}")
-        # Fallback для USDT/RUB
         if self.usdt_p2p is None and self.usd_effective:
             self.usdt_p2p = self.usd_effective * 1.01
 
@@ -196,23 +194,23 @@ class PriceManager:
         return round(rub_amount, 2)
 
     async def get_rates_info(self) -> str:
-    await self.update_rates()
-    cbr_str = f"{self.usd_cbr:.2f}" if self.usd_cbr is not None else "—"
-    market_str = f"{self.usd_market:.2f}" if self.usd_market is not None else "—"
-    effective_str = f"{self.usd_effective:.2f}" if self.usd_effective is not None else "—"
-    usdt_str = f"{self.usdt_p2p:.2f}" if self.usdt_p2p is not None else "—"
-    info = (
-        f"📈 <b>Актуальные курсы валют</b>\n\n"
-        f"🇷🇺 Курс USD/RUB (exchangerate.host): <b>{cbr_str}</b> ₽\n"
-        f"🌐 Рыночный (exchangerate-api): <b>{market_str}</b> ₽\n"
-        f"⭐ <b>Эффективный курс (средний): {effective_str}</b> ₽\n"
-        f"₿ USDT/RUB (CoinGecko): <b>{usdt_str}</b> ₽\n"
-        f"💎 Stars/USD: 1 Star = ${self.stars_usd_rate:.3f}\n\n"
-        f"💰 Комиссия приёма крипты: +2%\n"
-        f"⭐ Комиссия вывода Stars: +15%\n\n"
-        f"<i>Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
-    )
-    return info
+        await self.update_rates()
+        cbr_str = f"{self.usd_cbr:.2f}" if self.usd_cbr is not None else "—"
+        market_str = f"{self.usd_market:.2f}" if self.usd_market is not None else "—"
+        effective_str = f"{self.usd_effective:.2f}" if self.usd_effective is not None else "—"
+        usdt_str = f"{self.usdt_p2p:.2f}" if self.usdt_p2p is not None else "—"
+        info = (
+            f"📈 <b>Актуальные курсы валют</b>\n\n"
+            f"🇷🇺 Курс USD/RUB (exchangerate.host): <b>{cbr_str}</b> ₽\n"
+            f"🌐 Рыночный (exchangerate-api): <b>{market_str}</b> ₽\n"
+            f"⭐ <b>Эффективный курс (средний): {effective_str}</b> ₽\n"
+            f"₿ USDT/RUB (CoinGecko): <b>{usdt_str}</b> ₽\n"
+            f"💎 Stars/USD: 1 Star = ${self.stars_usd_rate:.3f}\n\n"
+            f"💰 Комиссия приёма крипты: +2%\n"
+            f"⭐ Комиссия вывода Stars: +15%\n\n"
+            f"<i>Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</i>"
+        )
+        return info
 
 price_manager = PriceManager()
 
@@ -2770,21 +2768,17 @@ async def admin_stats(message: Message):
     tickets_cnt = await supabase.table("tickets").select("*", count="exact").eq("status", "open").execute()
 
     # Дополнительная статистика
-    # Доход за последние 30 дней
     month_ago = (datetime.now() - timedelta(days=30)).isoformat()
     rev_30_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").gte("created_at", month_ago).execute()
     rev_30 = sum(p["amount_rub"] for p in rev_30_res.data) if rev_30_res.data else 0
 
-    # Доход за сегодня
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     rev_today_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").gte("created_at", today_start).execute()
     rev_today = sum(p["amount_rub"] for p in rev_today_res.data) if rev_today_res.data else 0
 
-    # Новые пользователи за сегодня
     new_users_res = await supabase.table("users").select("*", count="exact").gte("created_at", today_start).execute()
     new_users_today = new_users_res.count
 
-    # Активные подписки по серверам
     servers = await load_servers_from_supabase()
     server_sub_counts = {}
     for s in servers:
@@ -2965,7 +2959,6 @@ async def main():
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
     if WEBHOOK_HOST:
-        # Режим вебхука (production)
         base_url = WEBHOOK_HOST.rstrip('/')
         dp.startup.register(on_startup)
         dp.shutdown.register(on_shutdown)
@@ -2980,10 +2973,8 @@ async def main():
         site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
         await site.start()
         logger.info(f"🚀 Бот запущен в режиме вебхука на {WEBHOOK_HOST}:{WEBHOOK_PORT}")
-        # Бесконечное ожидание
         await asyncio.Event().wait()
     else:
-        # Fallback: long polling
         logger.warning("WEBHOOK_HOST не задан, запускаем в режиме long polling")
         await dp.start_polling(bot)
 
