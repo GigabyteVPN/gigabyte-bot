@@ -1548,9 +1548,9 @@ async def send_terms_card(message: Message):
     """Карточка с документами и кнопкой «Принять». Нижнее меню НЕ показываем."""
     await message.answer(
         "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
-        "✨ Максимальная скорость\n"
-        "🔒 Полная анонимность\n"
-        "🛡️ Надёжная защита\n\n"
+        "⚡ Высокая скорость соединения\n"
+        "🔐 Защищённое шифрованное подключение\n"
+        "📶 Безопасность в публичных сетях Wi-Fi\n\n"
         "📄 Перед использованием ознакомьтесь с документами ниже и нажмите «✅ Принять», "
         "чтобы продолжить.",
         parse_mode=ParseMode.HTML,
@@ -1577,9 +1577,9 @@ async def cmd_start(message: Message):
     if await has_accepted_terms(user_id):
         await message.answer(
             "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
-            "✨ Максимальная скорость\n"
-            "🔒 Полная анонимность\n"
-            "🛡️ Надёжная защита\n\n"
+            "⚡ Высокая скорость соединения\n"
+            "🔐 Защищённое шифрованное подключение\n"
+            "📶 Безопасность в публичных сетях Wi-Fi\n\n"
             "Выберите действие в меню ниже 👇",
             parse_mode=ParseMode.HTML,
             reply_markup=user_keyboard()
@@ -2147,7 +2147,7 @@ async def stars_pay_confirm_callback(callback: CallbackQuery, state: FSMContext)
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label="Подписка" if not is_extend else "Продление", amount=stars)],
-        start_parameter="vpn_extend" if is_extend else "vpn_subscription",
+        start_parameter="sub_extend" if is_extend else "subscription",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⭐ Оплатить", pay=True)]])
     )
     await state.clear()
@@ -2400,7 +2400,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
         extra = "" if panel_updated else "\n⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён."
         await message.answer(
-            f"✅ <b>Подписка успешно продлена!</b>\n\nВаша защита активна. Приятного использования! 🚀{extra}",
+            f"✅ <b>Подписка успешно продлена!</b>\n\nВаша подписка активна. Приятного использования! 🚀{extra}",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
@@ -2411,7 +2411,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
             await message.answer(
                 "🎉 <b>Оплата успешно подтверждена!</b>\n\n"
                 f"{config_text}\n\n"
-                "<i>Спасибо, что выбрали Gigabyte. Надёжная защита гарантирована.</i>",
+                "<i>Спасибо, что выбрали Gigabyte!</i>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=main_keyboard(is_admin(user_id))
             )
@@ -2511,7 +2511,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
         await supabase.table("pending_confirmations").delete().eq("user_id", user_id).execute()
         extra = "" if panel_updated else "\n⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён."
         await message.answer(
-            f"✅ <b>Подписка успешно продлена!</b>\n\nВаша защита активна.{extra}",
+            f"✅ <b>Подписка успешно продлена!</b>\n\nВаша подписка активна.{extra}",
             parse_mode=ParseMode.HTML,
             reply_markup=main_keyboard(is_admin(user_id))
         )
@@ -2937,7 +2937,7 @@ async def retry_stars_payment(callback: CallbackQuery):
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label="Подписка" if not is_extend else "Продление", amount=stars)],
-        start_parameter="vpn_extend" if is_extend else "vpn_subscription",
+        start_parameter="sub_extend" if is_extend else "subscription",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⭐ Оплатить", pay=True)]])
     )
     try:
@@ -3129,8 +3129,8 @@ async def os_instructions_callback(callback: CallbackQuery):
             "   • Откройте v2rayTun → нажмите «+» → «Импорт из буфера»\n\n"
             "3️⃣ <b>Подключитесь</b>\n"
             "   • Выберите сервер → нажмите на кнопку подключения\n"
-            "   • При запросе разрешения VPN нажмите «ОК»\n\n"
-            "✅ <b>Готово!</b> Вы защищены."
+            "   • При запросе разрешения на защищённое подключение нажмите «ОК»\n\n"
+            "✅ <b>Готово!</b> Соединение установлено."
         ),
         "ios": (
             "🍏 <b>Подключение на iOS</b>\n\n"
@@ -3142,8 +3142,8 @@ async def os_instructions_callback(callback: CallbackQuery):
             "   • Откройте Streisand → нажмите «+» → «Импорт из буфера»\n\n"
             "3️⃣ <b>Подключитесь</b>\n"
             "   • Нажмите на переключатель подключения\n"
-            "   • При первом запуске разрешите добавление VPN-конфигурации\n\n"
-            "✅ <b>Готово!</b> Ваш трафик зашифрован."
+            "   • При первом запуске разрешите добавление профиля защищённого подключения\n\n"
+            "✅ <b>Готово!</b> Соединение защищено шифрованием."
         ),
         "windows": (
             "💻 <b>Подключение на Windows</b>\n\n"
@@ -3157,7 +3157,7 @@ async def os_instructions_callback(callback: CallbackQuery):
             "3️⃣ <b>Настройте и подключитесь</b>\n"
             "   • Выберите режим «Системный прокси»\n"
             "   • Нажмите «Enter» на сервере или кнопку подключения\n\n"
-            "✅ <b>Готово!</b> Включен безопасный доступ."
+            "✅ <b>Готово!</b> Защищённое соединение включено."
         ),
         "mac": (
             "🍎 <b>Подключение на Mac</b>\n\n"
@@ -3169,8 +3169,8 @@ async def os_instructions_callback(callback: CallbackQuery):
             "   • Откройте Streisand → нажмите «+» → «Импорт из буфера»\n\n"
             "3️⃣ <b>Подключитесь</b>\n"
             "   • Нажмите на переключатель подключения\n"
-            "   • При первом запуске разрешите добавление VPN-конфигурации\n\n"
-            "✅ <b>Готово!</b> Безопасный доступ активирован."
+            "   • При первом запуске разрешите добавление профиля защищённого подключения\n\n"
+            "✅ <b>Готово!</b> Защищённое соединение активировано."
         )
     }
     caption = texts.get(os_type)
@@ -3557,7 +3557,7 @@ async def user_delete_self(message: Message):
         "⚠️ <b>ВНИМАНИЕ! Удаление аккаунта</b>\n\n"
         "Вы собираетесь <b>безвозвратно удалить</b> все ваши данные. Это действие <u>нельзя отменить</u>.\n\n"
         "<b>Будут удалены:</b>\n"
-        "• Все ваши активные подписки (доступ к VPN прекратится)\n"
+        "• Все ваши активные подписки (доступ к сервису прекратится)\n"
         "• История всех платежей\n"
         "• Ваши тикеты и сообщения в поддержку\n"
         "• Все ваши персональные данные\n\n"
