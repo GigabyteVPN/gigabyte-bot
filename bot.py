@@ -68,6 +68,11 @@ ALCHEMY_API_KEY: str = os.getenv("ALCHEMY_API_KEY") or ""
 # но это НЕ рекомендуется в проде (риск MITM).
 XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "true")
 
+# ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ ======================
+# Ссылки на публичную оферту и политику конфиденциальности.
+OFFER_URL: str = "https://telegra.ph/PUBLICHNAYA-OFERTA-Dogovor-na-okazanie-uslug-07-01"
+PRIVACY_URL: str = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-07-01-51"
+
 COUNTRIES = [
     "🇺🇸 США", "🇬🇧 Великобритания", "🇧🇷 Бразилия",
     "🇰🇷 Южная Корея", "🇨🇦 Канада", "🇯🇵 Япония",
@@ -668,140 +673,338 @@ class XUIApi:
             logger.error(f"❌ Ошибка получения клиентов из панели {self.server['name']}: {e}")
         return []
 
+# ====================== ХЕЛПЕРЫ ДЛЯ МАССОВЫХ ОПЕРАЦИЙ ======================
+def _chunked(seq: List[Any], size: int):
+    """Разбивает список на пачки заданного размера (для bulk-insert)."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+async def fetch_all_supabase_rows(table_name: str, select_cols: str = "*") -> List[dict]:
+    """Постранично выгружает ВСЕ строки таблицы.
+
+    Supabase по умолчанию отдаёт максимум 1000 строк за один запрос, поэтому
+    при большом количестве клиентов простой select("*") молча терял бы данные.
+    Здесь мы читаем страницами по 1000 строк, пока строки не закончатся."""
+    rows: List[dict] = []
+    page_size = 1000
+    start = 0
+    while True:
+        res = await supabase.table(table_name).select(select_cols).range(start, start + page_size - 1).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        start += page_size
+    return rows
+
+def _sub_needs_update(existing: dict, panel_client: dict, server_id: int) -> bool:
+    """Возвращает True, если данные подписки в БД отличаются от панели.
+    Позволяет не писать в БД лишний раз при повторных синхронизациях."""
+    if existing.get("server_id") != server_id:
+        return True
+    if existing.get("email") != panel_client.get("email"):
+        return True
+    if (existing.get("expiry_date") or 0) != (panel_client.get("expiryTime") or 0):
+        return True
+    if existing.get("status") != "active":
+        return True
+    return False
+
 # ====================== СИНХРОНИЗАЦИЯ КЛИЕНТОВ ======================
-async def sync_all_servers_with_supabase():
+async def sync_all_servers_with_supabase() -> dict:
+    """Полная двухпроходная синхронизация клиентов между панелями 3x-ui и Supabase.
+
+    Работает надёжно даже при большом количестве клиентов:
+      • подписки из БД выгружаются один раз и индексируются в памяти
+        (было O(N) запросов на N клиентов, стало O(1) на клиента);
+      • новые клиенты вставляются пачками (bulk insert по 100);
+      • апдейты пишутся только при реальном изменении данных;
+      • восстановление пропавших клиентов выполняется вторым проходом —
+        когда уже известно присутствие клиента во ВСЕХ доступных панелях,
+        что исключает ложные восстановления для перенесённых клиентов.
+
+    Возвращает статистику для отчёта администратору.
+    """
     logger.info("🔄 Запуск полной синхронизации клиентов...")
     await init_supabase()
+    stats: Dict[str, Any] = {
+        "servers_total": 0, "servers_ok": 0, "servers_failed": 0,
+        "imported": 0, "updated": 0, "restored": 0, "reports": []
+    }
     servers = await load_servers_from_supabase()
     if not servers:
         logger.warning("⚠️ Нет активных серверов.")
-        return
+        return stats
 
-    now_ts = int(datetime.now().timestamp() * 1000)
+    now_ts_ms = int(datetime.now().timestamp() * 1000)
+    now_sync = int(datetime.now().timestamp())
+
+    # Индексируем ВСЕ подписки один раз (с пагинацией)
+    all_subs = await fetch_all_supabase_rows("subscriptions", "*")
+    subs_by_uuid: Dict[str, dict] = {}
+    for s in all_subs:
+        if s.get("client_uuid"):
+            subs_by_uuid[s["client_uuid"]] = s
+
+    # ---- Первый проход: читаем панели, импортируем и обновляем ----
+    server_panels: Dict[int, dict] = {}   # server_id -> {"xui", "server", "report"}
+    global_panel_uuids: set = set()
 
     for server in servers:
         server_id = server["id"]
+        stats["servers_total"] += 1
+        report = {"name": server.get("name", str(server_id)),
+                  "imported": 0, "updated": 0, "restored": 0, "ok": True}
         xui = XUIApi(server)
-        panel_clients = await xui.get_clients()
-        await xui.close()
+        try:
+            if not await xui.login():
+                report["ok"] = False
+                stats["servers_failed"] += 1
+                stats["reports"].append(report)
+                await xui.close()
+                logger.warning(f"⚠️ Не удалось войти в панель {server.get('name')}")
+                continue
 
-        if not panel_clients:
-            logger.warning(f"⚠️ Нет клиентов из панели {server['name']}")
-            continue
+            panel_clients = await xui.get_clients()
+            panel_uuids = {c.get("id") for c in panel_clients if c.get("id")}
+            global_panel_uuids |= panel_uuids
 
-        for p_client in panel_clients:
-            existing = await supabase.table("subscriptions").select("id").eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
-            if not existing.data:
-                global_exists = await supabase.table("subscriptions").select("id").eq("client_uuid", p_client["id"]).execute()
-                if global_exists.data:
-                    await supabase.table("subscriptions").update({
+            to_insert: List[dict] = []
+            for p in panel_clients:
+                uuid_ = p.get("id")
+                if not uuid_:
+                    continue
+                existing = subs_by_uuid.get(uuid_)
+                if existing is None:
+                    new_row = {
+                        "user_id": None,
                         "server_id": server_id,
-                        "email": p_client.get("email"),
-                        "sub_id": p_client.get("subId", generate_sub_id()),
-                        "expiry_date": p_client.get("expiryTime"),
+                        "client_uuid": uuid_,
+                        "email": p.get("email"),
+                        "sub_id": p.get("subId") or generate_sub_id(),
+                        "expiry_date": p.get("expiryTime") or 0,
                         "status": "active",
-                        "last_sync": int(datetime.now().timestamp()),
-                    }).eq("client_uuid", p_client["id"]).execute()
-                    logger.info(f"🔄 Клиент {p_client['id']} перенесён на сервер {server['name']}")
-                else:
+                        "last_sync": now_sync,
+                    }
+                    to_insert.append(new_row)
+                    subs_by_uuid[uuid_] = new_row  # чтобы не восстанавливать позже
+                    report["imported"] += 1
+                elif _sub_needs_update(existing, p, server_id):
+                    update_fields = {
+                        "server_id": server_id,
+                        "email": p.get("email"),
+                        "expiry_date": p.get("expiryTime") or 0,
+                        "status": "active",
+                        "last_sync": now_sync,
+                    }
                     try:
-                        await supabase.table("subscriptions").insert({
-                            "user_id": None,
-                            "server_id": server_id,
-                            "client_uuid": p_client["id"],
-                            "email": p_client.get("email"),
-                            "sub_id": p_client.get("subId", generate_sub_id()),
-                            "expiry_date": p_client.get("expiryTime"),
-                            "status": "active",
-                            "last_sync": int(datetime.now().timestamp())
-                        }).execute()
-                        logger.info(f"➕ Клиент {p_client['id']} добавлен из панели {server['name']}")
+                        await supabase.table("subscriptions").update(update_fields).eq("client_uuid", uuid_).execute()
+                        existing.update(update_fields)
+                        report["updated"] += 1
                     except Exception as e:
-                        logger.error(f"❌ Ошибка добавления клиента {p_client['id']}: {e}")
-            else:
-                await supabase.table("subscriptions").update({
-                    "email": p_client.get("email"),
-                    "expiry_date": p_client.get("expiryTime"),
-                    "last_sync": int(datetime.now().timestamp())
-                }).eq("client_uuid", p_client["id"]).eq("server_id", server_id).execute()
+                        logger.error(f"❌ Ошибка обновления {uuid_}: {e}")
 
-        db_clients = await supabase.table("subscriptions").select("*").eq("server_id", server_id).eq("status", "active").execute()
-        for db_client in db_clients.data:
-            found = any(c["id"] == db_client["client_uuid"] for c in panel_clients)
-            if not found:
-                logger.warning(f"🔄 Восстановление клиента {db_client['client_uuid']} на сервере {server['name']}")
-                is_enable = db_client["expiry_date"] > now_ts or db_client["expiry_date"] == 0
+            # Пакетная вставка новых клиентов
+            if to_insert:
+                for chunk in _chunked(to_insert, 100):
+                    try:
+                        await supabase.table("subscriptions").insert(chunk).execute()
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка bulk-insert ({len(chunk)} шт) на {server.get('name')}: {e}")
+
+            server_panels[server_id] = {"xui": xui, "server": server, "report": report}
+            stats["imported"] += report["imported"]
+            stats["updated"] += report["updated"]
+            stats["servers_ok"] += 1
+            logger.info(f"✅ {server.get('name')}: импортировано {report['imported']}, обновлено {report['updated']}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка синхронизации сервера {server.get('name')}: {e}")
+            report["ok"] = False
+            stats["servers_failed"] += 1
+            try:
+                await xui.close()
+            except Exception:
+                pass
+        stats["reports"].append(report)
+
+    # ---- Второй проход: восстанавливаем клиентов, пропавших из ВСЕХ панелей ----
+    try:
+        for server_id, info in server_panels.items():
+            xui = info["xui"]
+            server = info["server"]
+            report = info["report"]
+            missing = [
+                s for s in subs_by_uuid.values()
+                if s.get("server_id") == server_id
+                and s.get("status") == "active"
+                and s.get("client_uuid") not in global_panel_uuids
+            ]
+            for db_client in missing:
+                expiry = db_client.get("expiry_date") or 0
+                is_enable = expiry > now_ts_ms or expiry == 0
                 client_dict = {
                     "id": db_client["client_uuid"],
                     "flow": "xtls-rprx-vision",
-                    "email": db_client["email"],
+                    "email": db_client.get("email"),
                     "limitIp": 2,
                     "totalGB": 0,
-                    "expiryTime": db_client["expiry_date"],
+                    "expiryTime": expiry,
                     "enable": is_enable,
                     "tgId": str(db_client.get("user_id") or ""),
-                    "subId": db_client["sub_id"],
-                    "reset": 0
+                    "subId": db_client.get("sub_id"),
+                    "reset": 0,
                 }
-                xui2 = XUIApi(server)
-                if await xui2.add_client(client_dict):
-                    await supabase.table("subscriptions").update({"last_sync": int(datetime.now().timestamp())}).eq("id", db_client["id"]).execute()
-                    logger.info(f"✅ Клиент {db_client['client_uuid']} восстановлен")
-                await xui2.close()
+                try:
+                    if await xui.add_client(client_dict):
+                        if db_client.get("id"):
+                            await supabase.table("subscriptions").update(
+                                {"last_sync": now_sync}
+                            ).eq("id", db_client["id"]).execute()
+                        stats["restored"] += 1
+                        report["restored"] += 1
+                        global_panel_uuids.add(db_client["client_uuid"])
+                        logger.info(f"✅ Клиент {db_client['client_uuid']} восстановлен на {server.get('name')}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка восстановления {db_client.get('client_uuid')}: {e}")
+    finally:
+        for info in server_panels.values():
+            try:
+                await info["xui"].close()
+            except Exception:
+                pass
 
-    logger.info("✅ Полная синхронизация завершена.")
+    logger.info(
+        f"✅ Синхронизация завершена. Серверов: {stats['servers_ok']}/{stats['servers_total']}, "
+        f"импортировано {stats['imported']}, обновлено {stats['updated']}, восстановлено {stats['restored']}."
+    )
+    return stats
 
-async def force_import_clients_from_panel(message: Message = None):
+async def force_import_clients_from_panel(message: Message = None) -> dict:
+    """Импорт клиентов из панелей 3x-ui в Supabase.
+
+    Оптимизирован для большого числа клиентов: существующие подписки
+    выгружаются один раз, новые вставляются пачками, апдейты минимальны.
+    Возвращает статистику импорта."""
     await init_supabase()
+    stats: Dict[str, Any] = {"servers": 0, "imported": 0, "moved": 0, "skipped": 0, "reports": []}
     servers = await load_servers_from_supabase()
     if not servers:
         if message:
             await message.answer("❌ Нет активных серверов.")
-        return
-    total_imported = 0
+        return stats
+
+    now_sync = int(datetime.now().timestamp())
+
+    # Один запрос вместо запроса на каждого клиента
+    all_subs = await fetch_all_supabase_rows("subscriptions", "client_uuid, server_id, id")
+    subs_by_uuid: Dict[str, dict] = {s["client_uuid"]: s for s in all_subs if s.get("client_uuid")}
+
     for server in servers:
+        server_id = server["id"]
+        stats["servers"] += 1
+        report = {"name": server.get("name", str(server_id)), "imported": 0, "moved": 0, "ok": True}
+
         xui = XUIApi(server)
-        panel_clients = await xui.get_clients()
-        await xui.close()
-        if not panel_clients:
+        logged = False
+        panel_clients: List[dict] = []
+        try:
+            logged = await xui.login()
+            if logged:
+                panel_clients = await xui.get_clients()
+        except Exception as e:
+            logger.error(f"❌ Ошибка чтения панели {server.get('name')}: {e}")
+        finally:
+            try:
+                await xui.close()
+            except Exception:
+                pass
+
+        if not logged:
+            report["ok"] = False
+            stats["reports"].append(report)
             if message:
-                await message.answer(f"❌ Не удалось получить клиентов с сервера {esc(server['name'])}")
+                await message.answer(f"⚠️ Не удалось войти в панель «{esc(server.get('name'))}». Пропускаю.")
             continue
-        count = 0
-        for p_client in panel_clients:
-            existing = await supabase.table("subscriptions").select("id").eq("client_uuid", p_client["id"]).eq("server_id", server["id"]).execute()
-            if not existing.data:
-                global_exists = await supabase.table("subscriptions").select("id").eq("client_uuid", p_client["id"]).execute()
-                if global_exists.data:
-                    await supabase.table("subscriptions").update({
-                        "server_id": server["id"],
-                        "email": p_client.get("email"),
-                        "sub_id": p_client.get("subId", generate_sub_id()),
-                        "expiry_date": p_client.get("expiryTime"),
-                        "status": "active",
-                        "last_sync": int(datetime.now().timestamp())
-                    }).eq("client_uuid", p_client["id"]).execute()
-                    count += 1
-                else:
-                    try:
-                        await supabase.table("subscriptions").insert({
-                            "user_id": None,
-                            "server_id": server["id"],
-                            "client_uuid": p_client["id"],
-                            "email": p_client.get("email"),
-                            "sub_id": p_client.get("subId", generate_sub_id()),
-                            "expiry_date": p_client.get("expiryTime"),
-                            "status": "active",
-                            "last_sync": int(datetime.now().timestamp())
-                        }).execute()
-                        count += 1
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка импорта {p_client['id']}: {e}")
-        total_imported += count
+
+        if not panel_clients:
+            stats["reports"].append(report)
+            if message:
+                await message.answer(f"ℹ️ На сервере «{esc(server.get('name'))}» клиентов не найдено.")
+            continue
+
+        to_insert: List[dict] = []
+        moved_uuids: List[str] = []
+        for p in panel_clients:
+            uuid_ = p.get("id")
+            if not uuid_:
+                continue
+            existing = subs_by_uuid.get(uuid_)
+            if existing is None:
+                row = {
+                    "user_id": None,
+                    "server_id": server_id,
+                    "client_uuid": uuid_,
+                    "email": p.get("email"),
+                    "sub_id": p.get("subId") or generate_sub_id(),
+                    "expiry_date": p.get("expiryTime") or 0,
+                    "status": "active",
+                    "last_sync": now_sync,
+                }
+                to_insert.append(row)
+                subs_by_uuid[uuid_] = row
+                report["imported"] += 1
+            elif existing.get("server_id") != server_id:
+                moved_uuids.append(uuid_)
+                existing["server_id"] = server_id
+                report["moved"] += 1
+            else:
+                stats["skipped"] += 1
+
+        # Пакетная вставка новых клиентов с прогрессом
+        inserted = 0
+        for chunk in _chunked(to_insert, 100):
+            try:
+                await supabase.table("subscriptions").insert(chunk).execute()
+                inserted += len(chunk)
+                if message and inserted and inserted % 500 == 0:
+                    await message.answer(f"… импортировано {inserted} на «{esc(server.get('name'))}»")
+            except Exception as e:
+                logger.error(f"❌ Ошибка bulk-insert импорта на {server.get('name')}: {e}")
+
+        # Обновление перенесённых на актуальный сервер
+        for uuid_ in moved_uuids:
+            try:
+                await supabase.table("subscriptions").update(
+                    {"server_id": server_id, "status": "active", "last_sync": now_sync}
+                ).eq("client_uuid", uuid_).execute()
+            except Exception as e:
+                logger.error(f"❌ Ошибка обновления перенесённого {uuid_}: {e}")
+
+        stats["imported"] += report["imported"]
+        stats["moved"] += report["moved"]
+        stats["reports"].append(report)
         if message:
-            await message.answer(f"✅ С сервера {esc(server['name'])} импортировано {count} новых клиентов.")
+            await message.answer(
+                f"✅ «{esc(server.get('name'))}»: новых {report['imported']}, перенесено {report['moved']}."
+            )
+
     if message:
-        await message.answer(f"🎉 Всего импортировано {total_imported} клиентов.")
+        lines = "\n".join(
+            f"  • {esc(r['name'])}: +{r['imported']} новых, ⇄{r['moved']} перенос."
+            + ("" if r["ok"] else " (ошибка входа)")
+            for r in stats["reports"]
+        ) or "  Нет данных"
+        await message.answer(
+            f"🎉 <b>Импорт завершён</b>\n\n"
+            f"🖥 Серверов обработано: {stats['servers']}\n"
+            f"➕ Импортировано новых: <b>{stats['imported']}</b>\n"
+            f"⇄ Перенесено на актуальный сервер: <b>{stats['moved']}</b>\n"
+            f"↩️ Уже были в базе: {stats['skipped']}\n\n"
+            f"{lines}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(True)
+        )
+    return stats
 
 async def sync_all_servers_periodically():
     # ИСПРАВЛЕНИЕ: ждём инициализации перед первым запуском
@@ -1151,7 +1354,8 @@ def user_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🎁 Пробная неделя"), KeyboardButton(text="👤 Личный кабинет")],
         [KeyboardButton(text="📱 Как подключиться"), KeyboardButton(text="❓ Поддержка")],
         [KeyboardButton(text="🌍 Запросить новую страну"), KeyboardButton(text="🎫 Активировать ключ")],
-        [KeyboardButton(text="⭐ Купить звёзды"), KeyboardButton(text="🗑 Удалить меня")]
+        [KeyboardButton(text="⭐ Купить звёзды"), KeyboardButton(text="🗑 Удалить меня")],
+        [KeyboardButton(text="📄 Публичная оферта"), KeyboardButton(text="🔒 Политика конфиденциальности")]
     ], resize_keyboard=True, persistent=True)
 
 def admin_keyboard() -> ReplyKeyboardMarkup:
@@ -1160,7 +1364,8 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🎫 Сгенерировать ключ"), KeyboardButton(text="📋 Список ключей"), KeyboardButton(text="📊 Статистика")],
         [KeyboardButton(text="✨ Создать подписку (админ)"), KeyboardButton(text="💰 Изменить цены"), KeyboardButton(text="📈 Курс"), KeyboardButton(text="⭐ Баланс звезды")],
         [KeyboardButton(text="🔄 Синхронизировать серверы"), KeyboardButton(text="📥 Импорт клиентов из панели")],
-        [KeyboardButton(text="👥 Управление пользователями")]
+        [KeyboardButton(text="👥 Управление пользователями")],
+        [KeyboardButton(text="📄 Публичная оферта"), KeyboardButton(text="🔒 Политика конфиденциальности")]
     ], resize_keyboard=True, persistent=True)
 
 def main_keyboard(is_admin_flag: bool = False) -> ReplyKeyboardMarkup:
@@ -1287,14 +1492,66 @@ async def cmd_start(message: Message):
     await load_tariffs()
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
+    # Инлайн-кнопки прямо в чате: оферта, политика и кнопка «Принять».
+    legal_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Публичная оферта", url=OFFER_URL)],
+        [InlineKeyboardButton(text="🔒 Политика конфиденциальности", url=PRIVACY_URL)],
+        [InlineKeyboardButton(text="✅ Принять", callback_data="accept_terms")]
+    ])
     await message.answer(
         "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
         "✨ Максимальная скорость\n"
         "🔒 Полная анонимность\n"
         "🛡️ Надёжная защита\n\n"
-        "Выберите действие ниже 👇",
+        "📄 Перед использованием ознакомьтесь с документами ниже и нажмите «✅ Принять».",
         parse_mode=ParseMode.HTML,
+        reply_markup=legal_kb
+    )
+    await message.answer(
+        "Выберите действие в меню ниже 👇",
         reply_markup=main_keyboard(is_admin(user_id))
+    )
+
+@router.callback_query(F.data == "accept_terms")
+async def accept_terms_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    try:
+        await callback.message.edit_text(
+            "✅ <b>Спасибо!</b> Вы приняли условия публичной оферты и политику конфиденциальности.\n\n"
+            "Приятного использования Gigabyte! 🚀",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        pass
+    await callback.message.answer(
+        "👇 Главное меню",
+        reply_markup=main_keyboard(is_admin(user_id))
+    )
+    await callback.answer("Условия приняты ✅")
+
+# ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ (КНОПКИ МЕНЮ) ======================
+@router.message(F.text == "📄 Публичная оферта")
+async def show_offer(message: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Открыть публичную оферту", url=OFFER_URL)]
+    ])
+    await message.answer(
+        "📄 <b>Публичная оферта</b>\n\n"
+        "Договор на оказание услуг. Нажмите кнопку ниже, чтобы открыть документ:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb
+    )
+
+@router.message(F.text == "🔒 Политика конфиденциальности")
+async def show_privacy(message: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔒 Открыть политику конфиденциальности", url=PRIVACY_URL)]
+    ])
+    await message.answer(
+        "🔒 <b>Политика конфиденциальности</b>\n\n"
+        "Как мы обрабатываем и защищаем ваши данные. Нажмите кнопку ниже, чтобы открыть документ:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb
     )
 
 # ====================== ПРОБНАЯ ПОДПИСКА ======================
@@ -3623,18 +3880,36 @@ async def cmd_sync_servers(message: Message):
         return
     await message.answer("⏳ Запускаю полную синхронизацию клиентов...")
     try:
-        await sync_all_servers_with_supabase()
-        await message.answer("✅ Синхронизация успешно завершена!")
+        stats = await sync_all_servers_with_supabase()
+        lines = "\n".join(
+            f"  • {esc(r['name'])}: +{r['imported']} / ✏️{r['updated']} / ♻️{r['restored']}"
+            + ("" if r["ok"] else " (недоступен)")
+            for r in stats["reports"]
+        ) or "  Нет данных"
+        await message.answer(
+            f"✅ <b>Синхронизация завершена</b>\n\n"
+            f"🖥 Серверов: {stats['servers_ok']}/{stats['servers_total']}\n"
+            f"➕ Импортировано новых: <b>{stats['imported']}</b>\n"
+            f"✏️ Обновлено: <b>{stats['updated']}</b>\n"
+            f"♻️ Восстановлено в панели: <b>{stats['restored']}</b>\n\n"
+            f"<i>Легенда: +новые / ✏️обновлены / ♻️восстановлены</i>\n{lines}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=main_keyboard(True)
+        )
     except Exception as e:
         logger.error(f"Ошибка синхронизации: {e}")
-        await message.answer(f"❌ Ошибка синхронизации: {e}")
+        await message.answer(f"❌ Ошибка синхронизации: {esc(e)}", reply_markup=main_keyboard(True))
 
 @router.message(F.text == "📥 Импорт клиентов из панели")
 async def cmd_force_import_clients(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("⏳ Запускаю импорт клиентов...")
-    await force_import_clients_from_panel(message)
+    await message.answer("⏳ Запускаю импорт клиентов из панелей...")
+    try:
+        await force_import_clients_from_panel(message)
+    except Exception as e:
+        logger.error(f"Ошибка импорта клиентов: {e}")
+        await message.answer(f"❌ Ошибка импорта: {esc(e)}", reply_markup=main_keyboard(True))
 
 # ====================== УСТАНОВКА КОМАНД БОТА ======================
 async def set_commands(bot_instance: Bot):
