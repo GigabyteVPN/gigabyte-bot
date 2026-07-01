@@ -6,6 +6,7 @@ import json
 import sys
 import secrets
 import re
+import html as html_lib
 import smtplib
 import tempfile
 import time
@@ -61,8 +62,11 @@ USDT_CONTRACT: str = os.getenv("USDT_CONTRACT") or ""
 USDC_CONTRACT: str = os.getenv("USDC_CONTRACT") or ""
 ALCHEMY_API_KEY: str = os.getenv("ALCHEMY_API_KEY") or ""
 
-# ИСПРАВЛЕНИЕ: API ключ вынесен в .env
-FREECURRENCY_API_KEY: str = os.getenv("FREECURRENCY_API_KEY") or ""
+# БЕЗОПАСНОСТЬ: проверка SSL-сертификата панели 3x-ui.
+# По умолчанию включена (True). Если у вас самоподписанный сертификат и вы
+# полностью доверяете сети до панели, можно временно отключить через .env,
+# но это НЕ рекомендуется в проде (риск MITM).
+XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "true")
 
 COUNTRIES = [
     "🇺🇸 США", "🇬🇧 Великобритания", "🇧🇷 Бразилия",
@@ -81,6 +85,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+if not ADMIN_IDS or ADMIN_IDS == [0]:
+    logger.warning("⚠️ ADMIN_IDS не задан или содержит только 0 — админ-панель будет недоступна никому.")
+
+# ====================== БЕЗОПАСНАЯ ВСТАВКА ТЕКСТА В HTML ======================
+# ИСПРАВЛЕНИЕ (безопасность): parse_mode=HTML используется во множестве мест,
+# куда попадает пользовательский ввод (имя пользователя, текст тикета, текст
+# запроса страны и т.д.). Без экранирования пользователь мог вставить теги
+# <a href="..."> и превратить сообщение в фишинговую ссылку в чате админа,
+# либо просто сломать разметку. Все пользовательские строки, которые
+# вставляются в HTML-сообщения, должны проходить через esc().
+def esc(text: Optional[Any]) -> str:
+    if text is None:
+        return ""
+    return html_lib.escape(str(text), quote=False)
+
 # ====================== RATE LIMITING ======================
 # ИСПРАВЛЕНИЕ: добавлена защита от флуда
 _rate_limits: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"count": 0, "reset_at": 0})
@@ -96,6 +115,20 @@ def check_rate_limit(user_id: int) -> bool:
         bucket["reset_at"] = now + _RATE_LIMIT_WINDOW
     bucket["count"] += 1
     return bucket["count"] <= _RATE_LIMIT_MAX
+
+async def cleanup_rate_limits_periodically():
+    """ИСПРАВЛЕНИЕ (безопасность/память): без очистки словарь _rate_limits
+    растёт неограниченно (по одному ключу на каждый когда-либо писавший
+    боту user_id), что является утечкой памяти при большом трафике.
+    Раз в час удаляем записи неактивных пользователей."""
+    while True:
+        await asyncio.sleep(3600)
+        now = time.time()
+        stale = [uid for uid, bucket in list(_rate_limits.items()) if now > bucket["reset_at"] + 3600]
+        for uid in stale:
+            _rate_limits.pop(uid, None)
+        if stale:
+            logger.info(f"🧹 Очищено {len(stale)} устаревших записей rate-limit")
 
 # ====================== ГЕНЕРАТОРЫ ======================
 def generate_payment_uid(prefix: str = "PAY") -> str:
@@ -138,6 +171,14 @@ def sanitize_text(text: str, max_len: int = 2000) -> str:
     return text[:max_len].strip()
 
 # ====================== КЛАСС УПРАВЛЕНИЯ КУРСАМИ ======================
+# ИСПРАВЛЕНИЕ: старый exchangerate.host с 2024 года требует платный ключ
+# и переставал отдавать данные бесплатно, а freecurrencyapi требует API-ключ
+# и платный тариф для валюты RUB на объёмах — оба источника были ненадёжны.
+# Теперь используется:
+#   1) официальный курс ЦБ РФ (cbr-xml-daily.ru — бесплатное зеркало JSON,
+#      с фолбэком на официальный XML-сервис www.cbr.ru) — как ОСНОВНОЙ курс;
+#   2) open.er-api.com — бесплатный рыночный курс без ключа — как резерв;
+#   3) CoinGecko — бесплатный курс USDT/RUB без ключа.
 class PriceManager:
     def __init__(self):
         self.usd_cbr = None
@@ -147,60 +188,65 @@ class PriceManager:
         self.last_update = 0
         self.stars_usd_rate = 0.02
 
+    async def _fetch_cbr_rate(self) -> Optional[float]:
+        # Основной источник: бесплатное JSON-зеркало официального курса ЦБ РФ
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get("https://www.cbr-xml-daily.ru/daily_json.js")
+                if r.status_code == 200:
+                    data = r.json()
+                    val = float(data["Valute"]["USD"]["Value"])
+                    if 30 < val < 300:
+                        return val
+        except Exception as e:
+            logger.warning(f"Ошибка получения курса ЦБ РФ (cbr-xml-daily.ru): {e}")
+
+        # Фолбэк: официальный XML-сервис ЦБ РФ напрямую
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get("https://www.cbr.ru/scripts/XML_daily.asp")
+                if r.status_code == 200:
+                    match = re.search(
+                        r'<Valute ID="R01235">.*?<Value>([\d,]+)</Value>',
+                        r.text, re.DOTALL
+                    )
+                    if match:
+                        val = float(match.group(1).replace(",", "."))
+                        if 30 < val < 300:
+                            return val
+        except Exception as e:
+            logger.warning(f"Ошибка получения курса ЦБ РФ (cbr.ru XML): {e}")
+        return None
+
+    async def _fetch_market_rate(self) -> Optional[float]:
+        # Бесплатный рыночный курс без API-ключа
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get("https://open.er-api.com/v6/latest/USD")
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("result") == "success":
+                        val = float(data["rates"]["RUB"])
+                        if 30 < val < 300:
+                            return val
+        except Exception as e:
+            logger.warning(f"Ошибка получения рыночного курса (open.er-api.com): {e}")
+        return None
+
     async def update_rates(self):
         if time.time() - self.last_update < 3600:
             return
-        cbr_rate = None
-        market_rate = None
 
-        # 1. Курс через exchangerate.host
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get("https://api.exchangerate.host/latest?base=USD&symbols=RUB")
-                if r.status_code == 200:
-                    data = r.json()
-                    if "rates" in data and "RUB" in data["rates"]:
-                        val = float(data["rates"]["RUB"])
-                        if 30 < val < 300:   # санитарная проверка диапазона
-                            cbr_rate = val
-                            self.usd_cbr = cbr_rate
-        except Exception as e:
-            logger.warning(f"Ошибка получения курса USD/RUB из exchangerate.host: {e}")
+        cbr_rate = await self._fetch_cbr_rate()
+        if cbr_rate:
+            self.usd_cbr = cbr_rate
 
-        # 2. Fallback: exchangerate-api.com
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get("https://api.exchangerate-api.com/v4/latest/USD")
-                if r.status_code == 200:
-                    data = r.json()
-                    val = float(data["rates"]["RUB"])
-                    if 30 < val < 300:
-                        market_rate = val
-                        self.usd_market = market_rate
-        except Exception as e:
-            logger.warning(f"Ошибка получения рыночного курса: {e}")
+        market_rate = await self._fetch_market_rate()
+        if market_rate:
+            self.usd_market = market_rate
 
-        # 3. Дополнительный fallback: freecurrencyapi (ключ из .env)
-        if not cbr_rate and not market_rate and FREECURRENCY_API_KEY:
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    r = await client.get(
-                        f"https://api.freecurrencyapi.com/v1/latest?apikey={FREECURRENCY_API_KEY}"
-                    )
-                    if r.status_code == 200:
-                        data = r.json()
-                        if "data" in data and "RUB" in data["data"]:
-                            val = float(data["data"]["RUB"])
-                            if 30 < val < 300:
-                                market_rate = val
-                                self.usd_market = market_rate
-            except Exception as e:
-                logger.warning(f"Ошибка получения курса из freecurrencyapi: {e}")
-
-        # Определяем эффективный курс
-        if cbr_rate and market_rate:
-            self.usd_effective = (cbr_rate + market_rate) / 2
-        elif cbr_rate:
+        # Официальный курс ЦБ РФ — приоритетный источник для расчётов
+        if cbr_rate:
             self.usd_effective = cbr_rate
         elif market_rate:
             self.usd_effective = market_rate
@@ -209,7 +255,7 @@ class PriceManager:
                 self.usd_effective = 90.0
             logger.warning("Не удалось получить актуальные курсы, используется предыдущее значение")
 
-        # 4. Курс USDT/RUB от CoinGecko
+        # Курс USDT/RUB от CoinGecko (бесплатно, без ключа)
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 r = await client.get(
@@ -249,15 +295,16 @@ class PriceManager:
 
     async def get_rates_info(self) -> str:
         await self.update_rates()
-        cbr_str = f"{self.usd_cbr:.2f}" if self.usd_cbr is not None else "—"
-        market_str = f"{self.usd_market:.2f}" if self.usd_market is not None else "—"
-        effective_str = f"{self.usd_effective:.2f}" if self.usd_effective is not None else "—"
-        usdt_str = f"{self.usdt_p2p:.2f}" if self.usdt_p2p is not None else "—"
+        cbr_str = f"{self.usd_cbr:.4f}" if self.usd_cbr is not None else "—"
+        market_str = f"{self.usd_market:.4f}" if self.usd_market is not None else "—"
+        effective_str = f"{self.usd_effective:.4f}" if self.usd_effective is not None else "—"
+        usdt_str = f"{self.usdt_p2p:.4f}" if self.usdt_p2p is not None else "—"
+        source = "официальный ЦБ РФ" if (self.usd_cbr is not None and self.usd_effective == self.usd_cbr) else "рыночный (резервный источник)"
         return (
             f"📈 <b>Актуальные курсы валют</b>\n\n"
-            f"🇷🇺 Курс USD/RUB (exchangerate.host): <b>{cbr_str}</b> ₽\n"
-            f"🌐 Рыночный (exchangerate-api): <b>{market_str}</b> ₽\n"
-            f"⭐ <b>Эффективный курс (средний): {effective_str}</b> ₽\n"
+            f"🏦 Официальный курс ЦБ РФ (USD/RUB): <b>{cbr_str}</b> ₽\n"
+            f"🌐 Рыночный курс (open.er-api.com): <b>{market_str}</b> ₽\n"
+            f"⭐ <b>Курс для расчётов ({source}): {effective_str}</b> ₽\n"
             f"₿ USDT/RUB (CoinGecko): <b>{usdt_str}</b> ₽\n"
             f"💎 Stars/USD: 1 Star = ${self.stars_usd_rate:.3f}\n\n"
             f"💰 Комиссия приёма крипты: +2%\n"
@@ -269,26 +316,29 @@ price_manager = PriceManager()
 
 # ====================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======================
 def get_user_identifier(user_id: int, username: Optional[str] = None, full_name: Optional[str] = None) -> str:
+    # ИСПРАВЛЕНИЕ: username/full_name — произвольный пользовательский ввод,
+    # который затем вставляется в HTML-сообщения. Экранируем во избежание
+    # HTML-инъекций (например, скрытых ссылок в сообщениях админу).
     if username:
-        return f"@{username}"
+        return f"@{esc(username)}"
     elif full_name:
-        return full_name
+        return esc(full_name)
     else:
         return str(user_id)
 
 def get_user_identifier_by_data(username: Optional[str], full_name: Optional[str], user_id: int) -> str:
     if username:
-        return f"@{username}"
+        return f"@{esc(username)}"
     elif full_name:
-        return full_name
+        return esc(full_name)
     else:
         return str(user_id)
 
 def get_user_display(user) -> str:
     if user.username:
-        return f"@{user.username}"
+        return f"@{esc(user.username)}"
     elif user.full_name:
-        return user.full_name
+        return esc(user.full_name)
     else:
         return f"ID: {user.id}"
 
@@ -382,7 +432,9 @@ class XUIApi:
         self.base_url = server["panel_url"].rstrip("/")
         self.username = server["panel_login"]
         self.password = server["panel_pass"]
-        self.client = httpx.AsyncClient(timeout=15, verify=False)
+        # ИСПРАВЛЕНИЕ (безопасность): SSL-проверка теперь управляется
+        # переменной окружения XUI_VERIFY_SSL (по умолчанию включена).
+        self.client = httpx.AsyncClient(timeout=15, verify=XUI_VERIFY_SSL)
         self.cookies = None
         self.csrf_token = None
 
@@ -713,7 +765,7 @@ async def force_import_clients_from_panel(message: Message = None):
         await xui.close()
         if not panel_clients:
             if message:
-                await message.answer(f"❌ Не удалось получить клиентов с сервера {server['name']}")
+                await message.answer(f"❌ Не удалось получить клиентов с сервера {esc(server['name'])}")
             continue
         count = 0
         for p_client in panel_clients:
@@ -747,7 +799,7 @@ async def force_import_clients_from_panel(message: Message = None):
                         logger.error(f"❌ Ошибка импорта {p_client['id']}: {e}")
         total_imported += count
         if message:
-            await message.answer(f"✅ С сервера {server['name']} импортировано {count} новых клиентов.")
+            await message.answer(f"✅ С сервера {esc(server['name'])} импортировано {count} новых клиентов.")
     if message:
         await message.answer(f"🎉 Всего импортировано {total_imported} клиентов.")
 
@@ -1339,35 +1391,78 @@ async def get_stars_balance(bot_instance: Bot) -> dict:
     except Exception:
         available = 0
     total_earned = 0
+    incoming_count = 0
+    outgoing_total = 0
     offset = 0
     limit = 100
     while True:
         try:
             txs = await bot_instance.get_star_transactions(offset=offset, limit=limit)
+            if not txs.transactions:
+                break
             for tx in txs.transactions:
                 if tx.amount > 0:
                     total_earned += tx.amount
+                    incoming_count += 1
+                else:
+                    outgoing_total += abs(tx.amount)
             if len(txs.transactions) < limit:
                 break
             offset += len(txs.transactions)
         except Exception:
             break
-    frozen = max(0, total_earned - available)
-    return {"available": available, "frozen": frozen, "total": total_earned}
+    frozen = max(0, total_earned - available - outgoing_total)
+    return {
+        "available": available,
+        "frozen": frozen,
+        "total": total_earned,
+        "incoming_count": incoming_count,
+        "outgoing_total": outgoing_total,
+    }
 
 @router.message(F.text == "⭐ Баланс звезды")
 async def admin_stars_balance(message: Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("⏳ Запрашиваю баланс звёзд у Telegram...")
+    await message.answer("⏳ Запрашиваю баланс звёзд у Telegram и данные из БД...")
     try:
         bal = await get_stars_balance(bot)
+
+        # ИСПРАВЛЕНИЕ/УЛУЧШЕНИЕ: дополняем баланс Telegram реальными данными
+        # из нашей БД — сколько и когда реально было оплачено звёздами.
+        stars_payments_res = await supabase.table("payments").select(
+            "amount_rub, created_at"
+        ).eq("method", "stars").eq("status", "completed").execute()
+        db_payments = stars_payments_res.data or []
+        db_count = len(db_payments)
+        db_rub_total = sum(p["amount_rub"] or 0 for p in db_payments)
+
+        now = datetime.now()
+        month_ago = (now - timedelta(days=30)).isoformat()
+        db_payments_30 = [p for p in db_payments if p["created_at"] >= month_ago]
+        db_count_30 = len(db_payments_30)
+        db_rub_30 = sum(p["amount_rub"] or 0 for p in db_payments_30)
+
+        avg_stars_per_tx = (bal["total"] / bal["incoming_count"]) if bal["incoming_count"] else 0
+        rub_per_star = (db_rub_total / bal["total"]) if bal["total"] else 0
+
         text = (
-            f"⭐ <b>Баланс звёзд бота</b>\n\n"
-            f"💰 Всего заработано: <b>{bal['total']}</b> ⭐\n"
-            f"❄️ Заморожено: <b>{bal['frozen']}</b> ⭐\n"
-            f"✅ Доступно: <b>{bal['available']}</b> ⭐\n\n"
-            f"<i>Замороженные звёзды станут доступны через 21 день.</i>"
+            f"⭐ <b>Баланс и статистика Telegram Stars</b>\n"
+            f"<i>Актуально на {now.strftime('%d.%m.%Y %H:%M')}</i>\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>💰 Баланс (данные Telegram API)</b>\n"
+            f"  Доступно к выводу: <b>{bal['available']}</b> ⭐\n"
+            f"  Заморожено (до 21 дня): <b>{bal['frozen']}</b> ⭐\n"
+            f"  Всего заработано: <b>{bal['total']}</b> ⭐\n"
+            f"  Выведено/списано: <b>{bal['outgoing_total']}</b> ⭐\n"
+            f"  Входящих транзакций: <b>{bal['incoming_count']}</b>\n"
+            f"  Средний чек: <b>{avg_stars_per_tx:.0f}</b> ⭐/платёж\n\n"
+            f"<b>📊 По данным бота (таблица payments)</b>\n"
+            f"  Оплат звёздами всего: <b>{db_count}</b>\n"
+            f"  В рублёвом эквиваленте: <b>{db_rub_total:.0f} ₽</b>\n"
+            f"  За 30 дней: <b>{db_count_30}</b> шт · <b>{db_rub_30:.0f} ₽</b>\n"
+            f"  Эффективный курс: <b>{rub_per_star:.2f} ₽</b>/⭐\n\n"
+            f"<i>Замороженные звёзды становятся доступны через 21 день после начисления.</i>"
         )
         await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
@@ -1397,7 +1492,7 @@ async def cmd_status(message: Message):
         server = server_map.get(sub["server_id"], {})
         expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y %H:%M")
         server_name = server.get("name", "Сервер")
-        text = f"🌍 <b>{server_name}</b>\n📅 Действует до: <code>{expiry}</code>\n🆔 <code>{sub['sub_id']}</code>"
+        text = f"🌍 <b>{esc(server_name)}</b>\n📅 Действует до: <code>{expiry}</code>\n🆔 <code>{sub['sub_id']}</code>"
         await message.answer(text, parse_mode=ParseMode.HTML)
 
 @router.message(Command("extend"))
@@ -2280,7 +2375,7 @@ async def admin_generate_key_server_callback(callback: CallbackQuery, state: FSM
         f"✅ <b>Ключ сгенерирован</b>\n\n"
         f"📝 <b>Код:</b> <code>{code}</code>\n"
         f"📅 <b>Срок:</b> {label}\n"
-        f"🌍 <b>Сервер:</b> {server['name']}\n\n"
+        f"🌍 <b>Сервер:</b> {esc(server['name'])}\n\n"
         f"Отправьте этот код пользователю.",
         parse_mode=ParseMode.HTML
     )
@@ -2360,7 +2455,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
                 continue
             expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y %H:%M")
             text = (
-                f"🌍 <b>{server['name']}</b>\n"
+                f"🌍 <b>{esc(server['name'])}</b>\n"
                 f"📅 Действует до: <code>{expiry}</code>\n"
                 f"🆔 <code>{sub['sub_id']}</code>\n\n"
                 f"📡 <b>Ваша ссылка на подписку:</b>\n"
@@ -2764,7 +2859,9 @@ async def support_start(message: Message, state: FSMContext):
 async def save_ticket(message: Message, state: FSMContext):
     ticket_id = generate_ticket_id()
     user_id = message.from_user.id
-    question = sanitize_text(message.text, 3000)
+    # ИСПРАВЛЕНИЕ (безопасность): экранируем текст пользователя перед вставкой
+    # в HTML-сообщение админу — это блокирует HTML/ссылочные инъекции.
+    question = esc(sanitize_text(message.text, 3000))
     created_at = datetime.now().isoformat()
     await supabase.table("tickets").insert({
         "user_id": user_id,
@@ -2775,7 +2872,7 @@ async def save_ticket(message: Message, state: FSMContext):
     await supabase.table("ticket_messages").insert({
         "ticket_id": ticket_id,
         "sender_id": user_id,
-        "message_text": question,
+        "message_text": message.text[:3000] if message.text else "",
         "created_at": created_at,
         "is_admin": False
     }).execute()
@@ -2832,12 +2929,13 @@ async def process_ticket_reply(message: Message, state: FSMContext):
         return
     sender_id = message.from_user.id
     is_admin_sender = is_admin(sender_id)
-    reply_text = sanitize_text(message.text, 3000)
+    reply_text_raw = sanitize_text(message.text, 3000)
+    reply_text = esc(reply_text_raw)
     created_at = datetime.now().isoformat()
     await supabase.table("ticket_messages").insert({
         "ticket_id": ticket_id,
         "sender_id": sender_id,
-        "message_text": reply_text,
+        "message_text": reply_text_raw,
         "created_at": created_at,
         "is_admin": is_admin_sender
     }).execute()
@@ -2935,7 +3033,7 @@ async def country_callback(callback: CallbackQuery, state: FSMContext):
         try:
             await bot.send_message(
                 admin_id,
-                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {country}\n🆔 <code>{request_id}</code>",
+                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {esc(country)}\n🆔 <code>{request_id}</code>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=admin_kb
             )
@@ -2949,16 +3047,17 @@ async def custom_country(message: Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await universal_cancel(message, state)
         return
-    country = sanitize_text(message.text, 100)
-    if not country:
+    country_raw = sanitize_text(message.text, 100)
+    if not country_raw:
         await message.answer("❌ Пустой запрос.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
         await state.clear()
         return
+    country = esc(country_raw)
     user_id = message.from_user.id
     request_id = generate_request_id()
     await supabase.table("country_requests").insert({
         "user_id": user_id,
-        "country": country,
+        "country": country_raw,
         "status": "open",
         "created_at": datetime.now().isoformat(),
         "request_id": request_id
@@ -3013,7 +3112,7 @@ async def process_country_reply(message: Message, state: FSMContext):
     try:
         await bot.send_message(
             user_id,
-            f"📬 <b>Ответ на запрос новой страны</b>\n\n{reply_text}",
+            f"📬 <b>Ответ на запрос новой страны</b>\n\n{esc(reply_text)}",
             parse_mode=ParseMode.HTML
         )
     except Exception:
@@ -3051,7 +3150,7 @@ async def admin_users_list(message: Message):
             text += "\n<b>📋 Подписки:</b>\n"
             for sub in subs.data[:3]:
                 server = server_map.get(sub["server_id"], {})
-                server_name = server.get("name", "Сервер")
+                server_name = esc(server.get("name", "Сервер"))
                 expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y")
                 text += f"  • {server_name} до {expiry} (<code>{sub['sub_id'][:8]}...</code>)\n"
         if payments.data:
@@ -3324,47 +3423,97 @@ async def admin_do_broadcast(message: Message, state: FSMContext):
 async def admin_stats(message: Message):
     if not is_admin(message.from_user.id):
         return
+    await message.answer("⏳ Собираю статистику из базы данных...")
+
     users_cnt = await supabase.table("users").select("*", count="exact").execute()
     active_cnt = await supabase.table("subscriptions").select("*", count="exact").eq("status", "active").execute()
-    rev_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").execute()
-    total_rev = sum(p["amount_rub"] for p in rev_res.data) if rev_res.data else 0
+
+    # ИСПРАВЛЕНИЕ/УЛУЧШЕНИЕ: полностью реальные данные из БД, без заглушек.
+    rev_res = await supabase.table("payments").select("amount_rub, user_id, method").eq("status", "completed").execute()
+    completed_payments = rev_res.data or []
+    total_rev = sum((p["amount_rub"] or 0) for p in completed_payments)
+    paying_users = {p["user_id"] for p in completed_payments if (p["amount_rub"] or 0) > 0}
+    paying_users_cnt = len(paying_users)
+    avg_check = (total_rev / len(completed_payments)) if completed_payments else 0
+    arpu = (total_rev / paying_users_cnt) if paying_users_cnt else 0
+    conversion = (paying_users_cnt / users_cnt.count * 100) if users_cnt.count else 0
+
+    method_breakdown: Dict[str, Dict[str, float]] = defaultdict(lambda: {"count": 0, "sum": 0.0})
+    for p in completed_payments:
+        m = p.get("method") or "unknown"
+        method_breakdown[m]["count"] += 1
+        method_breakdown[m]["sum"] += (p["amount_rub"] or 0)
+
     pending_cnt = await supabase.table("payments").select("*", count="exact").in_("status", ["pending_crypto", "awaiting_hash", "pending_stars"]).execute()
     tickets_cnt = await supabase.table("tickets").select("*", count="exact").eq("status", "open").execute()
 
-    month_ago = (datetime.now() - timedelta(days=30)).isoformat()
+    now = datetime.now()
+    month_ago = (now - timedelta(days=30)).isoformat()
+    week_ago = (now - timedelta(days=7)).isoformat()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
     rev_30_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").gte("created_at", month_ago).execute()
-    rev_30 = sum(p["amount_rub"] for p in rev_30_res.data) if rev_30_res.data else 0
+    rev_30 = sum((p["amount_rub"] or 0) for p in (rev_30_res.data or []))
 
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    rev_7_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").gte("created_at", week_ago).execute()
+    rev_7 = sum((p["amount_rub"] or 0) for p in (rev_7_res.data or []))
+
     rev_today_res = await supabase.table("payments").select("amount_rub").eq("status", "completed").gte("created_at", today_start).execute()
-    rev_today = sum(p["amount_rub"] for p in rev_today_res.data) if rev_today_res.data else 0
+    rev_today = sum((p["amount_rub"] or 0) for p in (rev_today_res.data or []))
 
-    new_users_res = await supabase.table("users").select("*", count="exact").gte("created_at", today_start).execute()
-    new_users_today = new_users_res.count
+    new_users_today_res = await supabase.table("users").select("*", count="exact").gte("created_at", today_start).execute()
+    new_users_week_res = await supabase.table("users").select("*", count="exact").gte("created_at", week_ago).execute()
+    new_users_month_res = await supabase.table("users").select("*", count="exact").gte("created_at", month_ago).execute()
+
+    now_ts_ms = int(now.timestamp() * 1000)
+    week_ms = 7 * 24 * 3600 * 1000
+    expiring_soon_res = await supabase.table("subscriptions").select("*", count="exact").eq("status", "active").gte("expiry_date", now_ts_ms).lte("expiry_date", now_ts_ms + week_ms).execute()
+
+    trial_used_res = await supabase.table("payments").select("*", count="exact").eq("method", "trial").execute()
 
     servers = await load_servers_from_supabase()
-    server_sub_counts = {}
+    server_sub_counts = []
     for s in servers:
         cnt = await supabase.table("subscriptions").select("*", count="exact").eq("server_id", s["id"]).eq("status", "active").execute()
-        server_sub_counts[s["name"]] = cnt.count
+        server_sub_counts.append((s["name"], cnt.count or 0))
+    server_sub_counts.sort(key=lambda x: x[1], reverse=True)
+    server_stats = "\n".join(
+        [f"  {i+1}. {esc(name)} — {count} подписок" for i, (name, count) in enumerate(server_sub_counts[:10])]
+    ) if server_sub_counts else "  Нет данных"
 
-    server_stats = "\n".join([f"  • {name}: {count} подписок" for name, count in server_sub_counts.items()]) if server_sub_counts else "Нет данных"
+    method_names = {"crypto": "₿ Криптовалюта", "stars": "⭐ Telegram Stars", "trial": "🎁 Пробный период"}
+    method_lines = []
+    for m, v in sorted(method_breakdown.items(), key=lambda x: -x[1]["sum"]):
+        method_lines.append(f"  • {method_names.get(m, esc(m))}: {int(v['count'])} шт · {v['sum']:.0f} ₽")
+    method_stats = "\n".join(method_lines) if method_lines else "  Нет данных"
 
-    await message.answer(
-        f"📊 <b>Расширенная статистика Gigabyte</b>\n\n"
-        f"👥 <b>Пользователей:</b> {users_cnt.count}\n"
-        f"✅ <b>Активных подписок:</b> {active_cnt.count}\n"
-        f"💰 <b>Общая выручка:</b> {total_rev:.0f} ₽\n"
-        f"📈 <b>Выручка за 30 дней:</b> {rev_30:.0f} ₽\n"
-        f"📆 <b>Выручка за сегодня:</b> {rev_today:.0f} ₽\n"
-        f"👤 <b>Новых пользователей сегодня:</b> {new_users_today}\n"
-        f"⏳ <b>Ожидающих платежей:</b> {pending_cnt.count}\n"
-        f"🎫 <b>Открытых тикетов:</b> {tickets_cnt.count}\n\n"
-        f"<b>🌍 Распределение подписок по серверам:</b>\n{server_stats}\n\n"
-        f"<i>Актуально на {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=main_keyboard(True)
+    text = (
+        f"📊 <b>Статистика Gigabyte</b>\n"
+        f"<i>Актуально на {now.strftime('%d.%m.%Y %H:%M')}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
+        f"👥 <b>Пользователи</b>\n"
+        f"  Всего: <b>{users_cnt.count}</b>\n"
+        f"  Новых сегодня: <b>{new_users_today_res.count}</b>\n"
+        f"  Новых за 7 дней: <b>{new_users_week_res.count}</b>\n"
+        f"  Новых за 30 дней: <b>{new_users_month_res.count}</b>\n\n"
+        f"💳 <b>Подписки</b>\n"
+        f"  Активных: <b>{active_cnt.count}</b>\n"
+        f"  Истекают в течение 7 дней: <b>{expiring_soon_res.count}</b>\n"
+        f"  Активировано пробных периодов: <b>{trial_used_res.count}</b>\n\n"
+        f"💰 <b>Финансы</b>\n"
+        f"  Выручка всего: <b>{total_rev:.0f} ₽</b>\n"
+        f"  За 30 дней: <b>{rev_30:.0f} ₽</b>\n"
+        f"  За 7 дней: <b>{rev_7:.0f} ₽</b>\n"
+        f"  За сегодня: <b>{rev_today:.0f} ₽</b>\n"
+        f"  Средний чек: <b>{avg_check:.0f} ₽</b>\n"
+        f"  ARPU (на платящего пользователя): <b>{arpu:.0f} ₽</b>\n"
+        f"  Конверсия в оплату: <b>{conversion:.1f}%</b> ({paying_users_cnt} из {users_cnt.count})\n\n"
+        f"💵 <b>По способам оплаты</b>\n{method_stats}\n\n"
+        f"🌍 <b>Топ серверов по активным подпискам</b>\n{server_stats}\n\n"
+        f"⏳ <b>Ожидающих оплаты:</b> {pending_cnt.count}\n"
+        f"🎫 <b>Открытых тикетов:</b> {tickets_cnt.count}\n"
     )
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
 
 @router.message(F.text == "✨ Создать подписку (админ)")
 async def admin_create_subscription_start(message: Message, state: FSMContext):
@@ -3431,7 +3580,7 @@ async def admin_tickets_list(message: Message):
         ticket_id = t["ticket_id"]
         user_id = t["user_id"]
         msg = await supabase.table("ticket_messages").select("message_text").eq("ticket_id", ticket_id).order("id").limit(1).execute()
-        first_msg = msg.data[0]["message_text"][:300] if msg.data else "Нет сообщений"
+        first_msg = esc(msg.data[0]["message_text"][:300]) if msg.data else "Нет сообщений"
         user = await supabase.table("users").select("username, full_name").eq("user_id", user_id).execute()
         u = user.data[0] if user.data else {}
         user_identifier = get_user_identifier(user_id, u.get("username"), u.get("full_name"))
@@ -3462,7 +3611,7 @@ async def admin_country_requests(message: Message):
             [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"countryreply_{r['request_id']}")]
         ])
         await message.answer(
-            f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {r['country']}\n🆔 <code>{r['request_id']}</code>",
+            f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {esc(r['country'])}\n🆔 <code>{r['request_id']}</code>",
             parse_mode=ParseMode.HTML,
             reply_markup=kb
         )
@@ -3549,6 +3698,7 @@ async def main():
     # Запускаем фоновые задачи
     asyncio.create_task(sync_all_servers_periodically())
     asyncio.create_task(daily_backup_task(bot))
+    asyncio.create_task(cleanup_rate_limits_periodically())
 
     if WEBHOOK_HOST:
         base_url = WEBHOOK_HOST.rstrip('/')
