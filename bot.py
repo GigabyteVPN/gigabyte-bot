@@ -1347,6 +1347,24 @@ async def rate_limit_cb_middleware(handler, event: CallbackQuery, data: dict):
             return
     return await handler(event, data)
 
+# ====================== MIDDLEWARE: ГЕЙТ СОГЛАСИЯ С УСЛОВИЯМИ ======================
+# Пока пользователь (не админ) не принял условия — не обрабатываем его сообщения
+# и не показываем нижнее меню. Вместо этого показываем карточку с принятием.
+# Команда /start пропускается всегда (внутри неё логика показа карточки/меню).
+@dp.message.outer_middleware()
+async def terms_gate_middleware(handler, event: Message, data: dict):
+    user_id = event.from_user.id if event.from_user else None
+    if user_id and not is_admin(user_id):
+        text = event.text or ""
+        if not text.startswith("/start"):
+            if not await has_accepted_terms(user_id):
+                await ensure_user_exists_supabase(
+                    user_id, event.from_user.username, event.from_user.full_name
+                )
+                await send_terms_card(event)
+                return
+    return await handler(event, data)
+
 # ====================== КЛАВИАТУРЫ ======================
 def user_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
@@ -1364,8 +1382,7 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🎫 Сгенерировать ключ"), KeyboardButton(text="📋 Список ключей"), KeyboardButton(text="📊 Статистика")],
         [KeyboardButton(text="✨ Создать подписку (админ)"), KeyboardButton(text="💰 Изменить цены"), KeyboardButton(text="📈 Курс"), KeyboardButton(text="⭐ Баланс звезды")],
         [KeyboardButton(text="🔄 Синхронизировать серверы"), KeyboardButton(text="📥 Импорт клиентов из панели")],
-        [KeyboardButton(text="👥 Управление пользователями")],
-        [KeyboardButton(text="📄 Публичная оферта"), KeyboardButton(text="🔒 Политика конфиденциальности")]
+        [KeyboardButton(text="👥 Управление пользователями")]
     ], resize_keyboard=True, persistent=True)
 
 def main_keyboard(is_admin_flag: bool = False) -> ReplyKeyboardMarkup:
@@ -1486,35 +1503,97 @@ async def cancel_cancel_callback(callback: CallbackQuery):
     await callback.message.answer("✅ Продолжаем ожидание хеша.", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
+# ====================== СОГЛАСИЕ С УСЛОВИЯМИ ======================
+# Пользователь получает доступ к нижнему меню и функциям бота ТОЛЬКО после
+# нажатия «✅ Принять» в карточке с офертой и политикой конфиденциальности.
+# Администраторы от согласия освобождены и сразу видят админ-меню.
+_accepted_terms_cache: set = set()
+
+async def has_accepted_terms(user_id: int) -> bool:
+    """True, если пользователь принял условия (или это администратор).
+
+    Быстрый путь — кэш в памяти. При промахе читаем из БД (колонка
+    users.accepted_terms). Если колонки нет — считаем, что не принято,
+    и полагаемся на кэш текущей сессии (см. set_accepted_terms)."""
+    if is_admin(user_id):
+        return True
+    if user_id in _accepted_terms_cache:
+        return True
+    try:
+        res = await supabase.table("users").select("accepted_terms").eq("user_id", user_id).execute()
+        if res.data and res.data[0].get("accepted_terms"):
+            _accepted_terms_cache.add(user_id)
+            return True
+    except Exception:
+        # Колонки accepted_terms может не быть — молча считаем, что не принято.
+        pass
+    return False
+
+async def set_accepted_terms(user_id: int):
+    """Фиксирует принятие условий: в кэше (гарантированно) и в БД (если есть колонка)."""
+    _accepted_terms_cache.add(user_id)
+    try:
+        await supabase.table("users").update({"accepted_terms": True}).eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить accepted_terms в БД (возможно, отсутствует колонка): {e}")
+
+def terms_card_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Публичная оферта", url=OFFER_URL)],
+        [InlineKeyboardButton(text="🔒 Политика конфиденциальности", url=PRIVACY_URL)],
+        [InlineKeyboardButton(text="✅ Принять", callback_data="accept_terms")]
+    ])
+
+async def send_terms_card(message: Message):
+    """Карточка с документами и кнопкой «Принять». Нижнее меню НЕ показываем."""
+    await message.answer(
+        "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
+        "✨ Максимальная скорость\n"
+        "🔒 Полная анонимность\n"
+        "🛡️ Надёжная защита\n\n"
+        "📄 Перед использованием ознакомьтесь с документами ниже и нажмите «✅ Принять», "
+        "чтобы продолжить.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=terms_card_keyboard()
+    )
+
 # ====================== /start ======================
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await load_tariffs()
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
-    # Инлайн-кнопки прямо в чате: оферта, политика и кнопка «Принять».
-    legal_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Публичная оферта", url=OFFER_URL)],
-        [InlineKeyboardButton(text="🔒 Политика конфиденциальности", url=PRIVACY_URL)],
-        [InlineKeyboardButton(text="✅ Принять", callback_data="accept_terms")]
-    ])
-    await message.answer(
-        "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
-        "✨ Максимальная скорость\n"
-        "🔒 Полная анонимность\n"
-        "🛡️ Надёжная защита\n\n"
-        "📄 Перед использованием ознакомьтесь с документами ниже и нажмите «✅ Принять».",
-        parse_mode=ParseMode.HTML,
-        reply_markup=legal_kb
-    )
-    await message.answer(
-        "Выберите действие в меню ниже 👇",
-        reply_markup=main_keyboard(is_admin(user_id))
-    )
+
+    # Администратор — сразу админ-меню, без согласия и без юр-кнопок.
+    if is_admin(user_id):
+        await message.answer(
+            "👋 <b>Админ-панель Gigabyte</b>\n\nВыберите действие ниже 👇",
+            parse_mode=ParseMode.HTML,
+            reply_markup=admin_keyboard()
+        )
+        return
+
+    # Пользователь уже принял условия — показываем нижнее меню.
+    if await has_accepted_terms(user_id):
+        await message.answer(
+            "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
+            "✨ Максимальная скорость\n"
+            "🔒 Полная анонимность\n"
+            "🛡️ Надёжная защита\n\n"
+            "Выберите действие в меню ниже 👇",
+            parse_mode=ParseMode.HTML,
+            reply_markup=user_keyboard()
+        )
+        return
+
+    # Иначе — только карточка с принятием условий. Нижнее меню НЕ показываем.
+    await send_terms_card(message)
 
 @router.callback_query(F.data == "accept_terms")
 async def accept_terms_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
+    # Админам эта кнопка не показывается, но на всякий случай не ломаем поведение.
+    await set_accepted_terms(user_id)
     try:
         await callback.message.edit_text(
             "✅ <b>Спасибо!</b> Вы приняли условия публичной оферты и политику конфиденциальности.\n\n"
