@@ -93,6 +93,11 @@ logger = logging.getLogger(__name__)
 if not ADMIN_IDS or ADMIN_IDS == [0]:
     logger.warning("⚠️ ADMIN_IDS не задан или содержит только 0 — админ-панель будет недоступна никому.")
 
+# ====================== ПОДСКАЗКА «КЛИК ДЛЯ КОПИРОВАНИЯ» ======================
+# В Telegram текст в <code>…</code> копируется по клику. Явно подсказываем это
+# пользователю рядом с каждым таким блоком.
+COPY_HINT: str = "<i>(Клик для копирования)</i>"
+
 # ====================== БЕЗОПАСНАЯ ВСТАВКА ТЕКСТА В HTML ======================
 # ИСПРАВЛЕНИЕ (безопасность): parse_mode=HTML используется во множестве мест,
 # куда попадает пользовательский ввод (имя пользователя, текст тикета, текст
@@ -174,6 +179,77 @@ def sanitize_text(text: str, max_len: int = 2000) -> str:
     if not text:
         return ""
     return text[:max_len].strip()
+# ====================== РЕЕСТР ЯРЛЫКОВ МЕНЮ И КОМАНД ======================
+# Любой текст из этого набора, присланный в режиме ожидания ввода, трактуется
+# НЕ как ввод (промокод/хеш/ID/текст тикета и т.п.), а как нажатие кнопки:
+# состояние сбрасывается и кнопка выполняется штатным хендлером.
+#
+# ВАЖНО: слова «VPN»/«ВПН» в ярлыках отсутствуют намеренно — вместо них
+# используются нейтральные формулировки («сервис», «подключение»).
+
+USER_BUTTON_LABELS: set = {
+    "🛒 Купить подписку",
+    "🎁 Пробная неделя",
+    "👤 Личный кабинет",
+    "📱 Как подключиться",
+    "❓ Поддержка",
+    "🌍 Запросить новую страну",
+    "🎫 Активировать ключ",
+    "⭐ Купить звёзды",
+    "🗑 Удалить меня",
+    "📄 Публичная оферта",
+    "🔒 Политика конфиденциальности",
+}
+
+ADMIN_BUTTON_LABELS: set = {
+    "📢 Сделать рассылку",
+    "🎫 Тикеты поддержки",
+    "🌍 Запросы на новую страну",
+    "🎫 Сгенерировать ключ",
+    "📋 Список ключей",
+    "📊 Статистика",
+    "✨ Создать подписку (админ)",
+    "💰 Изменить цены",
+    "📈 Курс",
+    "⭐ Баланс звёзд",
+    "🔄 Синхронизировать серверы",
+    "📥 Импорт клиентов из панели",
+    "👥 Управление пользователями",
+}
+
+# Ярлыки-приветствия, которые тоже должны прерывать ввод (обрабатываются как /start).
+GREETING_WORDS: set = {
+    "привет", "hi", "hello", "здравствуй", "добрый день",
+    "доброе утро", "добрый вечер", "хай", "всем привет",
+}
+
+# Полный набор «служебных» текстов, при виде которых guard прерывает ввод.
+# «◀️ Назад» и «❌ Отмена» имеют собственную навигационную логику и
+# обрабатываются отдельно (до guard'а), поэтому здесь не нужны.
+ALL_MENU_LABELS: set = USER_BUTTON_LABELS | ADMIN_BUTTON_LABELS
+
+# Команды, начинающиеся со слэша, тоже прерывают режим ввода.
+KNOWN_COMMANDS: set = {
+    "/start", "/buy", "/cabinet", "/status", "/extend",
+    "/connect", "/support", "/key", "/help",
+}
+
+def is_menu_interrupt(text: Optional[str]) -> bool:
+    """True, если присланный в режиме ввода текст — это кнопка меню,
+    команда или приветствие (то есть пользователь передумал вводить данные
+    и нажал что-то из меню)."""
+    if not text:
+        return False
+    t = text.strip()
+    if t in ALL_MENU_LABELS:
+        return True
+    if t.lower() in GREETING_WORDS:
+        return True
+    # /command и /command@botname
+    if t.startswith("/"):
+        base = t.split()[0].split("@", 1)[0].lower()
+        return base in KNOWN_COMMANDS
+    return False
 
 # ====================== КЛАСС УПРАВЛЕНИЯ КУРСАМИ ======================
 # ИСПРАВЛЕНИЕ: старый exchangerate.host с 2024 года требует платный ключ
@@ -1123,7 +1199,8 @@ def generate_subscription_link(server: dict, sub_id: str) -> str:
 def generate_config_for_connection(sub_link: str) -> str:
     return (
         f"📡 <b>Ваша ссылка на подписку</b>\n"
-        f"<code>{sub_link}</code>\n\n"
+        f"<code>{esc(sub_link)}</code>\n"
+        f"{COPY_HINT}\n\n"
         f"<i>Скопируйте ссылку и импортируйте в приложение (v2rayTun, Streisand или другое, поддерживающее подписки).</i>"
     )
 
@@ -1321,6 +1398,17 @@ class AdminCountryReplyStates(StatesGroup):
 class ResendHashState(StatesGroup):
     waiting_hash = State()
 
+# Состояния оплаты, где НЕЛЬЗЯ прерывать ввод нажатием кнопки меню
+# (иначе пользователь потеряет контекст платежа). В них работают только
+# инлайн-кнопки «✅ Я оплатил» / «❌ Отмена» и ввод TXID.
+PAYMENT_PROTECTED_STATES: set = {
+    BuyStates.waiting_crypto_payment.state,
+    BuyStates.wait_crypto_hash.state,
+    ExtendSubscriptionStates.waiting_crypto_payment.state,
+    ExtendSubscriptionStates.wait_crypto_hash.state,
+    ResendHashState.waiting_hash.state,
+}
+
 # ====================== БОТ ======================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -1345,6 +1433,33 @@ async def rate_limit_cb_middleware(handler, event: CallbackQuery, data: dict):
         if not check_rate_limit(user_id):
             await event.answer("⚠️ Слишком много запросов. Подождите.", show_alert=True)
             return
+    return await handler(event, data)
+
+# ====================== MIDDLEWARE: ПРЕРЫВАНИЕ ВВОДА КНОПКОЙ МЕНЮ ======================
+# ГЛАВНОЕ ИСПРАВЛЕНИЕ по ТЗ: если пользователь находится в состоянии ожидания
+# ввода (например, ждём промокод / user_id / текст тикета / хеш при повторной
+# отправке и т.п.) и вместо ввода нажимает кнопку меню или команду — раньше
+# бот принимал ТЕКСТ КНОПКИ за введённые данные (промокод и т.д.).
+#
+# Теперь: обнаружив такой «перехват», middleware СБРАСЫВАЕТ состояние и
+# пропускает событие дальше, где его штатно обрабатывает хендлер кнопки —
+# то есть кнопка срабатывает так, как будто никакого ввода и не было.
+#
+# ИСКЛЮЧЕНИЕ: состояния оплаты (PAYMENT_PROTECTED_STATES) не прерываются,
+# чтобы не потерять контекст платежа; там навигация идёт своими кнопками.
+#
+# Стоит ПОСЛЕ rate-limit, но ДО terms-gate и хендлеров.
+@dp.message.outer_middleware()
+async def menu_interrupt_middleware(handler, event: Message, data: dict):
+    state: Optional[FSMContext] = data.get("state")
+    if state is not None and event.text:
+        current = await state.get_state()
+        if current is not None and current not in PAYMENT_PROTECTED_STATES:
+            # «◀️ Назад» и «❌ Отмена» имеют собственную навигацию — не мешаем им.
+            txt = event.text.strip()
+            if txt not in ("◀️ Назад", "❌ Отмена") and is_menu_interrupt(txt):
+                await state.clear()
+                logger.info(f"↩️ Ввод прерван кнопкой «{txt}» — состояние {current} сброшено")
     return await handler(event, data)
 
 # ====================== MIDDLEWARE: ГЕЙТ СОГЛАСИЯ С УСЛОВИЯМИ ======================
@@ -1380,7 +1495,7 @@ def admin_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="📢 Сделать рассылку"), KeyboardButton(text="🎫 Тикеты поддержки"), KeyboardButton(text="🌍 Запросы на новую страну")],
         [KeyboardButton(text="🎫 Сгенерировать ключ"), KeyboardButton(text="📋 Список ключей"), KeyboardButton(text="📊 Статистика")],
-        [KeyboardButton(text="✨ Создать подписку (админ)"), KeyboardButton(text="💰 Изменить цены"), KeyboardButton(text="📈 Курс"), KeyboardButton(text="⭐ Баланс звезды")],
+        [KeyboardButton(text="✨ Создать подписку (админ)"), KeyboardButton(text="💰 Изменить цены"), KeyboardButton(text="📈 Курс"), KeyboardButton(text="⭐ Баланс звёзд")],
         [KeyboardButton(text="🔄 Синхронизировать серверы"), KeyboardButton(text="📥 Импорт клиентов из панели")],
         [KeyboardButton(text="👥 Управление пользователями")]
     ], resize_keyboard=True, persistent=True)
@@ -1610,7 +1725,8 @@ async def accept_terms_callback(callback: CallbackQuery):
 
 # ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ (КНОПКИ МЕНЮ) ======================
 @router.message(F.text == "📄 Публичная оферта")
-async def show_offer(message: Message):
+async def show_offer(message: Message, state: FSMContext):
+    await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Открыть публичную оферту", url=OFFER_URL)]
     ])
@@ -1622,7 +1738,8 @@ async def show_offer(message: Message):
     )
 
 @router.message(F.text == "🔒 Политика конфиденциальности")
-async def show_privacy(message: Message):
+async def show_privacy(message: Message, state: FSMContext):
+    await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔒 Открыть политику конфиденциальности", url=PRIVACY_URL)]
     ])
@@ -1636,6 +1753,7 @@ async def show_privacy(message: Message):
 # ====================== ПРОБНАЯ ПОДПИСКА ======================
 @router.message(F.text == "🎁 Пробная неделя")
 async def request_trial(message: Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     res = await supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
@@ -1708,7 +1826,8 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
 
 # ====================== КНОПКА "КУПИТЬ ЗВЁЗДЫ" ======================
 @router.message(F.text == "⭐ Купить звёзды")
-async def buy_stars(message: Message):
+async def buy_stars(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(
         "✨ <b>Пополнить баланс Telegram Stars</b>\n\n"
         "Вы можете приобрести звёзды у официального бота @PremiumBot.\n"
@@ -1756,10 +1875,11 @@ async def get_stars_balance(bot_instance: Bot) -> dict:
         "outgoing_total": outgoing_total,
     }
 
-@router.message(F.text == "⭐ Баланс звезды")
-async def admin_stars_balance(message: Message):
+@router.message(F.text == "⭐ Баланс звёзд")
+async def admin_stars_balance(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer("⏳ Запрашиваю баланс звёзд у Telegram и данные из БД...")
     try:
         bal = await get_stars_balance(bot)
@@ -1803,7 +1923,7 @@ async def admin_stars_balance(message: Message):
         await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
         logger.error(f"Ошибка получения баланса звёзд: {e}")
-        await message.answer(f"❌ Не удалось получить баланс: {e}", reply_markup=main_keyboard(True))
+        await message.answer(f"❌ Не удалось получить баланс: {esc(e)}", reply_markup=main_keyboard(True))
 
 # ====================== ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ======================
 @router.message(Command("buy"))
@@ -1811,11 +1931,13 @@ async def cmd_buy(message: Message, state: FSMContext):
     await buy_start(message, state)
 
 @router.message(Command("cabinet"))
-async def cmd_cabinet(message: Message):
+async def cmd_cabinet(message: Message, state: FSMContext):
+    await state.clear()
     await cabinet_entry(message)
 
 @router.message(Command("status"))
-async def cmd_status(message: Message):
+async def cmd_status(message: Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     await init_supabase()
     res = await supabase.table("subscriptions").select("server_id, expiry_date, sub_id").eq("user_id", user_id).eq("status", "active").execute()
@@ -1828,11 +1950,16 @@ async def cmd_status(message: Message):
         server = server_map.get(sub["server_id"], {})
         expiry = datetime.fromtimestamp(sub["expiry_date"] / 1000).strftime("%d.%m.%Y %H:%M")
         server_name = server.get("name", "Сервер")
-        text = f"🌍 <b>{esc(server_name)}</b>\n📅 Действует до: <code>{expiry}</code>\n🆔 <code>{sub['sub_id']}</code>"
+        text = (
+            f"🌍 <b>{esc(server_name)}</b>\n"
+            f"📅 Действует до: <code>{expiry}</code>\n"
+            f"🆔 <code>{sub['sub_id']}</code> {COPY_HINT}"
+        )
         await message.answer(text, parse_mode=ParseMode.HTML)
 
 @router.message(Command("extend"))
 async def cmd_extend(message: Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     await init_supabase()
     res = await supabase.table("subscriptions").select("sub_id, server_id").eq("user_id", user_id).eq("status", "active").limit(1).execute()
@@ -1850,7 +1977,8 @@ async def cmd_extend(message: Message, state: FSMContext):
     await show_tariffs(message, state)
 
 @router.message(Command("connect"))
-async def cmd_connect(message: Message):
+async def cmd_connect(message: Message, state: FSMContext):
+    await state.clear()
     await instructions_os(message)
 
 @router.message(Command("support"))
@@ -1862,7 +1990,8 @@ async def cmd_key(message: Message, state: FSMContext):
     await activate_key_start(message, state)
 
 @router.message(Command("help"))
-async def cmd_help(message: Message):
+async def cmd_help(message: Message, state: FSMContext):
+    await state.clear()
     help_text = (
         "📋 <b>Доступные команды бота:</b>\n\n"
         "/start — Главное меню\n"
@@ -1879,8 +2008,6 @@ async def cmd_help(message: Message):
     await message.answer(help_text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(is_admin(message.from_user.id)))
 
 # ====================== ПРИВЕТСТВИЕ ======================
-GREETING_WORDS = {"привет", "hi", "hello", "здравствуй", "добрый день", "доброе утро", "добрый вечер", "хай", "всем привет"}
-
 @router.message(F.text.lower().in_(GREETING_WORDS))
 async def greeting_handler(message: Message):
     await cmd_start(message)
@@ -1947,6 +2074,7 @@ async def back_to_method_callback(callback: CallbackQuery, state: FSMContext):
 
 @router.message(F.text == "🛒 Купить подписку")
 async def buy_start(message: Message, state: FSMContext):
+    await state.clear()
     await ensure_user_exists_supabase(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.set_state(BuyStates.select_server)
     await show_servers(message)
@@ -2200,11 +2328,11 @@ async def crypto_currency_selected(callback: CallbackQuery, state: FSMContext):
     rub_amount = data["rub"]
     message_text = (
         f"₿ <b>Оплата криптовалютой ({currency})</b>\n\n"
-        f"🔹 Сумма: <b><code>{amount_crypto:.2f}</code> {currency}</b>\n"
+        f"🔹 Сумма: <b><code>{amount_crypto:.2f}</code> {currency}</b> {COPY_HINT}\n"
         f"🔹 В рублях: ≈ <b>{rub_amount:.0f} ₽</b>\n\n"
         f"🌐 Сеть: <b>Arbitrum One</b>\n"
-        f"📄 Контракт токена:\n<code>{contract}</code>\n\n"
-        f"👛 Кошелёк:\n<code>{ARBITRUM_WALLET}</code>\n\n"
+        f"📄 Контракт токена:\n<code>{esc(contract)}</code>\n{COPY_HINT}\n\n"
+        f"👛 Кошелёк:\n<code>{esc(ARBITRUM_WALLET)}</code>\n{COPY_HINT}\n\n"
         f"<i>После перевода нажмите «✅ Я оплатил» и пришлите TXID.</i>"
     )
     qr_file = generate_wallet_qr(ARBITRUM_WALLET, amount_crypto, currency)
@@ -2281,7 +2409,8 @@ async def pay_confirm(callback: CallbackQuery, state: FSMContext):
         "• В вашем криптокошельке после отправки\n"
         "• В обозревателе Arbitrum (arbiscan.io)\n\n"
         "📝 <b>Пример хеша:</b>\n"
-        "<code>0x742d35cc6634c0532925a3b8448bc454978c4ef43a27204aefc3b78ac5b40984</code>\n\n"
+        "<code>0x742d35cc6634c0532925a3b8448bc454978c4ef43a27204aefc3b78ac5b40984</code>\n"
+        f"{COPY_HINT}\n\n"
         "⚠️ Отправьте именно TXID транзакции, которой вы отправили средства.",
         parse_mode=ParseMode.HTML,
         reply_markup=kb
@@ -2355,7 +2484,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
     if not success:
         await supabase.table("payments").update({"status": "pending_crypto"}).eq("id", payment_id).execute()
         await message.answer(
-            f"❌ {reason}\n\n"
+            f"❌ {esc(reason)}\n\n"
             "Проверьте корректность TXID и попробуйте снова.\n"
             "Если проблема повторяется, обратитесь в поддержку.",
             reply_markup=main_keyboard(is_admin(user_id))
@@ -2425,7 +2554,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
                         f"Пользователь: {user_info}\n"
                         f"Сумма: {data['rub']} ₽ ({data['usd']} {data.get('crypto_currency', 'USDT')})\n"
                         f"Метод: Криптовалюта\n"
-                        f"Транзакция: <code>{tx_hash}</code>\n\n"
+                        f"Транзакция: <code>{esc(tx_hash)}</code> {COPY_HINT}\n\n"
                         f"Не удалось добавить клиента в панель 3x-ui. Проверьте логи.",
                         parse_mode=ParseMode.HTML
                     )
@@ -2540,7 +2669,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
                         f"🚨 <b>СБОЙ СОЗДАНИЯ ПОДПИСКИ ПОСЛЕ ОПЛАТЫ STARS</b>\n\n"
                         f"Пользователь: {user_info}\n"
                         f"Сумма: {data['rub']} ₽ ({data.get('stars', '?')} Stars)\n"
-                        f"ID транзакции: <code>{provider_charge_id}</code>\n\n"
+                        f"ID транзакции: <code>{esc(provider_charge_id)}</code> {COPY_HINT}\n\n"
                         f"Не удалось добавить клиента в панель. Проверьте логи.",
                         parse_mode=ParseMode.HTML
                     )
@@ -2555,11 +2684,13 @@ async def successful_payment_handler(message: Message, state: FSMContext):
 # ====================== АКТИВАЦИЯ КЛЮЧА ======================
 @router.message(F.text == "🎫 Активировать ключ")
 async def activate_key_start(message: Message, state: FSMContext):
+    await state.clear()
     await state.set_state(ActivateKeyStates.waiting_code)
     await message.answer(
         "🔑 <b>Активация промокода</b>\n\n"
         "Введите промокод в формате:\n"
-        "<code>GIFT-ABCD1234EFGH5678</code>\n\n"
+        "<code>GIFT-ABCD1234EFGH5678</code>\n"
+        f"{COPY_HINT}\n\n"
         "Промокод можно получить у администратора или в рамках акций.",
         parse_mode=ParseMode.HTML,
         reply_markup=main_keyboard(is_admin(message.from_user.id))
@@ -2567,7 +2698,7 @@ async def activate_key_start(message: Message, state: FSMContext):
 
 @router.message(ActivateKeyStates.waiting_code)
 async def process_activate_key(message: Message, state: FSMContext):
-    raw_code = message.text.strip().upper()
+    raw_code = (message.text or "").strip().upper()
     user_id = message.from_user.id
 
     # ИСПРАВЛЕНИЕ: валидация формата промокода
@@ -2638,6 +2769,7 @@ async def process_activate_key(message: Message, state: FSMContext):
 async def admin_generate_key_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await state.set_state(AdminGenerateKeyStates.waiting_months)
     await message.answer("🎫 <b>Выберите срок действия ключа</b>", parse_mode=ParseMode.HTML, reply_markup=promo_months_keyboard())
 
@@ -2709,7 +2841,7 @@ async def admin_generate_key_server_callback(callback: CallbackQuery, state: FSM
 
     await callback.message.edit_text(
         f"✅ <b>Ключ сгенерирован</b>\n\n"
-        f"📝 <b>Код:</b> <code>{code}</code>\n"
+        f"📝 <b>Код:</b> <code>{code}</code> {COPY_HINT}\n"
         f"📅 <b>Срок:</b> {label}\n"
         f"🌍 <b>Сервер:</b> {esc(server['name'])}\n\n"
         f"Отправьте этот код пользователю.",
@@ -2725,14 +2857,15 @@ async def promo_cancel_server_callback(callback: CallbackQuery, state: FSMContex
     await callback.answer()
 
 @router.message(F.text == "📋 Список ключей")
-async def admin_list_keys(message: Message):
+async def admin_list_keys(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     res = await supabase.table("promo_keys").select("code, months, used, used_by, created_at").order("created_at", desc=True).limit(20).execute()
     if not res.data:
         await message.answer("Нет сгенерированных ключей.", reply_markup=main_keyboard(True))
         return
-    text = "🔑 <b>Последние ключи:</b>\n\n"
+    text = f"🔑 <b>Последние ключи:</b> {COPY_HINT}\n\n"
     for k in res.data:
         used_by = k.get("used_by")
         if k["used"] and used_by:
@@ -2764,7 +2897,8 @@ async def cabinet_entry(message: Message):
     await message.answer("👤 <b>Личный кабинет</b>\n\nВыберите раздел:", parse_mode=ParseMode.HTML, reply_markup=kb)
 
 @router.message(F.text == "👤 Личный кабинет")
-async def cabinet(message: Message):
+async def cabinet(message: Message, state: FSMContext):
+    await state.clear()
     await cabinet_entry(message)
 
 @router.callback_query(F.data.startswith("cabinet_"))
@@ -2793,9 +2927,10 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
             text = (
                 f"🌍 <b>{esc(server['name'])}</b>\n"
                 f"📅 Действует до: <code>{expiry}</code>\n"
-                f"🆔 <code>{sub['sub_id']}</code>\n\n"
+                f"🆔 <code>{sub['sub_id']}</code> {COPY_HINT}\n\n"
                 f"📡 <b>Ваша ссылка на подписку:</b>\n"
-                f"<code>{generate_subscription_link(server, sub['sub_id'])}</code>"
+                f"<code>{esc(generate_subscription_link(server, sub['sub_id']))}</code>\n"
+                f"{COPY_HINT}"
             )
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Продлить подписку", callback_data=f"extend_{sub['sub_id']}")]
@@ -2821,7 +2956,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
             }
             status_display = status_map.get(p["status"], p["status"])
             text = (
-                f"💸 <code>{p['payment_uid']}</code>\n"
+                f"💸 <code>{p['payment_uid']}</code> {COPY_HINT}\n"
                 f"💰 {p['amount_rub']} ₽ • {p['method'].upper()}\n"
                 f"📅 {dt}\n"
                 f"📊 Статус: {status_display}"
@@ -2852,7 +2987,7 @@ async def cabinet_callback(callback: CallbackQuery, state: FSMContext):
         }
         for p in hist.data:
             dt_str = datetime.fromisoformat(p["created_at"]).strftime("%d.%m.%Y %H:%M")
-            text = f"<b>🧾 <code>{p['payment_uid']}</code></b>\n"
+            text = f"<b>🧾 <code>{p['payment_uid']}</code></b> {COPY_HINT}\n"
             if p["method"] == "crypto" and p.get("currency") and p.get("amount_usd"):
                 text += f"💰 Сумма: <b>{p['amount_usd']} {p['currency']}</b>\n"
                 text += f"💵 Эквивалент: ≈ {p['amount_rub']:.0f} ₽\n"
@@ -2889,7 +3024,8 @@ async def resend_hash_callback(callback: CallbackQuery, state: FSMContext):
         "• В вашем криптокошельке после отправки\n"
         "• В обозревателе Arbitrum (arbiscan.io)\n\n"
         "📝 <b>Пример хеша:</b>\n"
-        "<code>0x742d35cc6634c0532925a3b8448bc454978c4ef43a27204aefc3b78ac5b40984</code>",
+        "<code>0x742d35cc6634c0532925a3b8448bc454978c4ef43a27204aefc3b78ac5b40984</code>\n"
+        f"{COPY_HINT}",
         parse_mode=ParseMode.HTML,
         reply_markup=kb
     )
@@ -2951,7 +3087,7 @@ async def process_resend_hash(message: Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await universal_cancel(message, state)
         return
-    tx_hash = message.text.strip()
+    tx_hash = (message.text or "").strip()
     # ИСПРАВЛЕНИЕ: строгая валидация
     if not is_valid_tx_hash(tx_hash):
         await message.answer(
@@ -3001,7 +3137,7 @@ async def process_resend_hash(message: Message, state: FSMContext):
 
     if not success:
         await supabase.table("payments").update({"status": "pending_crypto"}).eq("id", payment_id).execute()
-        await message.answer(f"❌ {reason}\n\nПопробуйте снова.", reply_markup=main_keyboard(is_admin(user_id)))
+        await message.answer(f"❌ {esc(reason)}\n\nПопробуйте снова.", reply_markup=main_keyboard(is_admin(user_id)))
         await state.clear()
         return
 
@@ -3102,7 +3238,7 @@ async def extend_subscription(callback: CallbackQuery, state: FSMContext):
     await show_tariffs(callback.message, state)
     await callback.answer()
 
-# ====================== ИНСТРУКЦИИ С ИЗОБРАЖЕНИЯМИ ======================
+# ====================== ИНСТРУКЦИИ ПО ПОДКЛЮЧЕНИЮ ======================
 @router.message(F.text == "📱 Как подключиться")
 async def instructions_os(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -3183,6 +3319,7 @@ async def os_instructions_callback(callback: CallbackQuery):
 # ====================== ПОДДЕРЖКА (ТИКЕТЫ) ======================
 @router.message(F.text == "❓ Поддержка")
 async def support_start(message: Message, state: FSMContext):
+    await state.clear()
     await ensure_user_exists_supabase(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.set_state(TicketStates.waiting_question)
     await message.answer(
@@ -3193,6 +3330,9 @@ async def support_start(message: Message, state: FSMContext):
 
 @router.message(TicketStates.waiting_question)
 async def save_ticket(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Пожалуйста, опишите проблему текстом.")
+        return
     ticket_id = generate_ticket_id()
     user_id = message.from_user.id
     # ИСПРАВЛЕНИЕ (безопасность): экранируем текст пользователя перед вставкой
@@ -3257,6 +3397,9 @@ async def ticket_reply_callback(callback: CallbackQuery, state: FSMContext):
 
 @router.message(TicketStates.waiting_reply)
 async def process_ticket_reply(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Пожалуйста, отправьте ответ текстом.")
+        return
     data = await state.get_data()
     ticket_id = data.get("ticket_id")
     if not ticket_id:
@@ -3340,6 +3483,7 @@ async def ticket_close_callback(callback: CallbackQuery):
 # ====================== ЗАПРОС НОВОЙ СТРАНЫ ======================
 @router.message(F.text == "🌍 Запросить новую страну")
 async def request_country(message: Message, state: FSMContext):
+    await state.clear()
     await ensure_user_exists_supabase(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.set_state(CountryRequestStates.waiting_country)
     await message.answer("🌏 <b>Выберите страну или напишите свою</b>", parse_mode=ParseMode.HTML, reply_markup=country_keyboard())
@@ -3369,7 +3513,7 @@ async def country_callback(callback: CallbackQuery, state: FSMContext):
         try:
             await bot.send_message(
                 admin_id,
-                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {esc(country)}\n🆔 <code>{request_id}</code>",
+                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {esc(country)}\n🆔 <code>{request_id}</code> {COPY_HINT}",
                 parse_mode=ParseMode.HTML,
                 reply_markup=admin_kb
             )
@@ -3383,7 +3527,7 @@ async def custom_country(message: Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await universal_cancel(message, state)
         return
-    country_raw = sanitize_text(message.text, 100)
+    country_raw = sanitize_text(message.text or "", 100)
     if not country_raw:
         await message.answer("❌ Пустой запрос.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
         await state.clear()
@@ -3408,7 +3552,7 @@ async def custom_country(message: Message, state: FSMContext):
         try:
             await bot.send_message(
                 admin_id,
-                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {country}\n🆔 <code>{request_id}</code>",
+                f"🌍 <b>Запрос новой страны</b>\nОт: {user_display}\n🌎 Страна: {country}\n🆔 <code>{request_id}</code> {COPY_HINT}",
                 parse_mode=ParseMode.HTML,
                 reply_markup=admin_kb
             )
@@ -3443,7 +3587,7 @@ async def process_country_reply(message: Message, state: FSMContext):
         await message.answer("❌ Данные не найдены.", reply_markup=main_keyboard(True))
         await state.clear()
         return
-    reply_text = sanitize_text(message.text, 2000)
+    reply_text = sanitize_text(message.text or "", 2000)
     await supabase.table("country_requests").update({"status": "closed"}).eq("request_id", request_id).execute()
     try:
         await bot.send_message(
@@ -3458,9 +3602,10 @@ async def process_country_reply(message: Message, state: FSMContext):
 
 # ====================== УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (АДМИН) ======================
 @router.message(F.text == "👥 Управление пользователями")
-async def admin_users_list(message: Message):
+async def admin_users_list(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     users = await supabase.table("users").select("user_id, username, full_name, created_at").order("created_at", desc=True).execute()
     if not users.data:
         await message.answer("Нет пользователей.", reply_markup=main_keyboard(True))
@@ -3475,7 +3620,7 @@ async def admin_users_list(message: Message):
         user_identifier = get_user_identifier(uid, u.get("username"), u.get("full_name"))
         text = (
             f"🆔 <b>Пользователь:</b> {user_identifier}\n"
-            f"📌 <b>Telegram ID:</b> <code>{uid}</code>\n"
+            f"📌 <b>Telegram ID:</b> <code>{uid}</code> {COPY_HINT}\n"
             f"📅 <b>Регистрация:</b> {reg_date}\n"
             f"📊 <b>Активных подписок:</b> {sub_count}\n"
             f"💰 <b>Всего оплачено:</b> {total_paid:.0f} ₽\n"
@@ -3537,7 +3682,8 @@ async def delete_user_callback(callback: CallbackQuery):
 
 # ====================== УДАЛЕНИЕ СЕБЯ ПОЛЬЗОВАТЕЛЕМ ======================
 @router.message(F.text == "🗑 Удалить меня")
-async def user_delete_self(message: Message):
+async def user_delete_self(message: Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     if is_admin(user_id):
         await message.answer("❌ Администратор не может удалить себя через эту кнопку.", reply_markup=main_keyboard(True))
@@ -3562,7 +3708,7 @@ async def user_delete_self(message: Message):
         "• Ваши тикеты и сообщения в поддержку\n"
         "• Все ваши персональные данные\n\n"
         "<b>Ваши данные:</b>\n"
-        f"🆔 Telegram ID: <code>{user_id}</code>\n"
+        f"🆔 Telegram ID: <code>{user_id}</code> {COPY_HINT}\n"
         f"👤 Username: {get_user_identifier(user_id, message.from_user.username, message.from_user.full_name)}\n"
         f"📅 Дата регистрации: {reg_date}\n"
         f"📊 Активных подписок: {len(subs.data)}\n"
@@ -3624,11 +3770,12 @@ async def cancel_self_delete(callback: CallbackQuery):
     await callback.message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
     await callback.answer()
 
-# ====================== АДМИН-ПАНЕЛЬ ======================
+# ====================== АДМИН-ПАНЕЛЬ: КУРС И ЦЕНЫ ======================
 @router.message(F.text == "📈 Курс")
-async def admin_show_rates(message: Message):
+async def admin_show_rates(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     try:
         await message.answer(await price_manager.get_rates_info(), parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
@@ -3639,6 +3786,7 @@ async def admin_show_rates(message: Message):
 async def admin_edit_prices(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await state.set_state(AdminPriceStates.waiting_action)
     await message.answer("💰 <b>Редактирование цен</b>\n\nВыберите действие:", parse_mode=ParseMode.HTML, reply_markup=price_percent_keyboard())
 
@@ -3648,6 +3796,9 @@ async def save_new_prices(message: Message, state: FSMContext):
         return
     if message.text == "◀️ Назад":
         await universal_cancel(message, state)
+        return
+    if not message.text:
+        await message.answer("❌ Отправьте текст.")
         return
     try:
         if message.text.startswith("+"):
@@ -3714,17 +3865,19 @@ async def save_new_prices(message: Message, state: FSMContext):
         await message.answer("✅ <b>Цены успешно обновлены!</b>", parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
     except Exception as e:
         logger.error(f"Ошибка изменения цен: {e}")
-        await message.answer(f"❌ Ошибка: {e}", reply_markup=price_percent_keyboard())
+        await message.answer(f"❌ Ошибка: {esc(e)}", reply_markup=price_percent_keyboard())
     await state.clear()
 
 @router.message(AdminPriceStates.waiting_manual_input)
 async def manual_prices_input(message: Message, state: FSMContext):
     await save_new_prices(message, state)
 
+# ====================== АДМИН-ПАНЕЛЬ: РАССЫЛКА ======================
 @router.message(F.text == "📢 Сделать рассылку")
 async def admin_broadcast(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await state.set_state(AdminBroadcastStates.waiting_message)
     await message.answer(
         "📢 <b>Создание рассылки</b>\n\nВведите текст сообщения для рассылки всем пользователям:",
@@ -3738,7 +3891,7 @@ async def admin_do_broadcast(message: Message, state: FSMContext):
     if message.text == "❌ Отмена":
         await universal_cancel(message, state)
         return
-    text = sanitize_text(message.text, 4000)
+    text = sanitize_text(message.text or "", 4000)
     users = await supabase.table("users").select("user_id").execute()
     count = 0
     for u in users.data:
@@ -3755,10 +3908,12 @@ async def admin_do_broadcast(message: Message, state: FSMContext):
     )
     await state.clear()
 
+# ====================== АДМИН-ПАНЕЛЬ: СТАТИСТИКА ======================
 @router.message(F.text == "📊 Статистика")
-async def admin_stats(message: Message):
+async def admin_stats(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer("⏳ Собираю статистику из базы данных...")
 
     users_cnt = await supabase.table("users").select("*", count="exact").execute()
@@ -3851,10 +4006,12 @@ async def admin_stats(message: Message):
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=main_keyboard(True))
 
+# ====================== АДМИН-ПАНЕЛЬ: СОЗДАНИЕ ПОДПИСКИ ======================
 @router.message(F.text == "✨ Создать подписку (админ)")
 async def admin_create_subscription_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await state.set_state(AdminCreateSubStates.waiting_user_id)
     await message.answer("👤 <b>Создание подписки</b>\n\nВведите Telegram ID пользователя:", parse_mode=ParseMode.HTML)
 
@@ -3863,10 +4020,10 @@ async def admin_create_subscription_get_user(message: Message, state: FSMContext
     if not is_admin(message.from_user.id):
         return
     # ИСПРАВЛЕНИЕ: строгая валидация user_id
-    if not is_valid_user_id(message.text.strip()):
+    if not is_valid_user_id(message.text or ""):
         await message.answer("❌ Неверный user_id. Введите числовой Telegram ID (до 10 цифр).")
         return
-    uid = int(message.text.strip())
+    uid = int((message.text or "").strip())
     user = await supabase.table("users").select("user_id").eq("user_id", uid).execute()
     if not user.data:
         await message.answer("❌ Пользователь не найден в базе.")
@@ -3905,9 +4062,10 @@ async def admin_create_subscription_server_callback(callback: CallbackQuery, sta
 
 # ====================== ТИКЕТЫ И ЗАПРОСЫ В ГЛАВНОМ МЕНЮ АДМИНА ======================
 @router.message(F.text == "🎫 Тикеты поддержки")
-async def admin_tickets_list(message: Message):
+async def admin_tickets_list(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     tickets = await supabase.table("tickets").select("ticket_id, user_id").eq("status", "open").order("id", desc=True).execute()
     if not tickets.data:
         await message.answer("📭 Нет открытых тикетов.", reply_markup=main_keyboard(True))
@@ -3925,16 +4083,17 @@ async def admin_tickets_list(message: Message):
              InlineKeyboardButton(text="🔒 Закрыть", callback_data=f"ticket_close_{ticket_id}")]
         ])
         await message.answer(
-            f"🎫 <b><code>{ticket_id}</code></b>\n👤 От: {user_identifier}\n\n📝 {first_msg}",
+            f"🎫 <b><code>{ticket_id}</code></b> {COPY_HINT}\n👤 От: {user_identifier}\n\n📝 {first_msg}",
             parse_mode=ParseMode.HTML,
             reply_markup=kb
         )
     await message.answer("Все открытые тикеты показаны выше.", reply_markup=main_keyboard(True))
 
 @router.message(F.text == "🌍 Запросы на новую страну")
-async def admin_country_requests(message: Message):
+async def admin_country_requests(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     reqs = await supabase.table("country_requests").select("request_id, user_id, country").eq("status", "open").order("id", desc=True).execute()
     if not reqs.data:
         await message.answer("🌍 Нет открытых запросов на новые страны.", reply_markup=main_keyboard(True))
@@ -3947,16 +4106,18 @@ async def admin_country_requests(message: Message):
             [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"countryreply_{r['request_id']}")]
         ])
         await message.answer(
-            f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {esc(r['country'])}\n🆔 <code>{r['request_id']}</code>",
+            f"🌍 <b>Запрос новой страны</b>\n👤 От: {user_identifier}\n🌎 Страна: {esc(r['country'])}\n🆔 <code>{r['request_id']}</code> {COPY_HINT}",
             parse_mode=ParseMode.HTML,
             reply_markup=kb
         )
     await message.answer("Все открытые запросы показаны выше.", reply_markup=main_keyboard(True))
 
+# ====================== АДМИН-ПАНЕЛЬ: СИНХРОНИЗАЦИЯ / ИМПОРТ ======================
 @router.message(F.text == "🔄 Синхронизировать серверы")
-async def cmd_sync_servers(message: Message):
+async def cmd_sync_servers(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer("⏳ Запускаю полную синхронизацию клиентов...")
     try:
         stats = await sync_all_servers_with_supabase()
@@ -3980,9 +4141,10 @@ async def cmd_sync_servers(message: Message):
         await message.answer(f"❌ Ошибка синхронизации: {esc(e)}", reply_markup=main_keyboard(True))
 
 @router.message(F.text == "📥 Импорт клиентов из панели")
-async def cmd_force_import_clients(message: Message):
+async def cmd_force_import_clients(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer("⏳ Запускаю импорт клиентов из панелей...")
     try:
         await force_import_clients_from_panel(message)
@@ -4005,6 +4167,9 @@ async def set_commands(bot_instance: Bot):
     ])
 
 # ====================== FALLBACK ======================
+# ВАЖНО: этот хендлер ловит любое сообщение, не пойманное выше. Благодаря
+# menu_interrupt_middleware сюда уже не попадёт нажатие кнопки меню в режиме
+# ввода — оно будет перехвачено и выполнено соответствующим хендлером кнопки.
 @router.message()
 async def unknown_message(message: Message, state: FSMContext):
     current_state = await state.get_state()
