@@ -4153,6 +4153,20 @@ async def cmd_force_import_clients(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка импорта: {esc(e)}", reply_markup=main_keyboard(True))
 
 # ====================== УСТАНОВКА КОМАНД БОТА ======================
+async def setup_menu_button(bot_instance: Bot):
+    """Если задан WEBAPP_URL — кнопка меню бота открывает мини-апп."""
+    webapp_url = os.getenv("WEBAPP_URL")
+    if not webapp_url:
+        return
+    try:
+        from aiogram.types import MenuButtonWebApp, WebAppInfo
+        await bot_instance.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="⚡ Приложение", web_app=WebAppInfo(url=webapp_url))
+        )
+        logger.info(f"✅ Кнопка меню настроена на веб-апп: {webapp_url}")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось настроить кнопку веб-аппа: {e}")
+
 async def set_commands(bot_instance: Bot):
     await bot_instance.set_my_commands([
         BotCommand(command="start", description="Главное меню"),
@@ -4207,6 +4221,7 @@ async def on_shutdown(bot_instance: Bot):
 async def main():
     await init_supabase()
     await set_commands(bot)
+    await setup_menu_button(bot)
     await load_tariffs()
 
     WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
@@ -4219,12 +4234,14 @@ async def main():
     asyncio.create_task(daily_backup_task(bot))
     asyncio.create_task(cleanup_rate_limits_periodically())
 
+    # HTTP-сервер поднимаем ВСЕГДА: на нём живут API мини-аппа (/api/*),
+    # статика веб-аппа (/app/) и — при заданном WEBHOOK_HOST — вебхук бота.
+    from webapp_api import setup_webapp_api
+    app = web.Application()
+
     if WEBHOOK_HOST:
-        base_url = WEBHOOK_HOST.rstrip('/')
         dp.startup.register(lambda: on_startup(bot))
         dp.shutdown.register(lambda: on_shutdown(bot))
-
-        app = web.Application()
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
@@ -4233,14 +4250,18 @@ async def main():
         webhook_requests_handler.register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
 
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
-        await site.start()
-        logger.info(f"🚀 Бот запущен в режиме вебхука на {base_url}:{WEBHOOK_PORT}")
+    setup_webapp_api(app, sys.modules[__name__])
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=WEBHOOK_PORT)
+    await site.start()
+
+    if WEBHOOK_HOST:
+        logger.info(f"🚀 Бот запущен в режиме вебхука на {WEBHOOK_HOST.rstrip('/')}:{WEBHOOK_PORT}")
         await asyncio.Event().wait()
     else:
-        logger.warning("WEBHOOK_HOST не задан, запускаем в режиме long polling")
+        logger.warning(f"WEBHOOK_HOST не задан: long polling + API веб-аппа на порту {WEBHOOK_PORT}")
         await dp.start_polling(bot)
 
 if __name__ == "__main__":

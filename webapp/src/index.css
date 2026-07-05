@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer utilities {
+  @keyframes pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(0.85); }
+    100% { transform: scale(1); }
+  }
+
+  .animate-pop-150 {
+    animation: pop 150ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .glass-panel {
+    @apply bg-[#1C1C1E]/80 backdrop-blur-xl border border-transparent shadow-none;
+  }
+
+  .ios-list {
+    @apply bg-[#1C1C1E] rounded-[38px] overflow-hidden;
+  }
+  
+  .ios-list-item {
+    @apply flex items-center justify-between p-4 bg-transparent active:bg-[#2C2C2E]/80 transition-colors border-0 text-left relative;
+  }
+
+  .ios-list-item:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 3rem;
+    left: 4.5rem;
+    height: 1px;
+    background-color: rgba(60, 60, 64, 0.8);
+  }
+
+  .glass-button {
+    @apply bg-[#2C2C2E] hover:bg-[#3A3A3D] active:bg-white/[0.05] transition-all duration-300 font-semibold text-white shadow-sm;
+  }
+
+  .glass-button-primary {
+    @apply bg-[#0A84FF] hover:bg-[#007AFF] active:bg-[#0066CC] transition-all duration-300 font-semibold text-white shadow-sm;
+  }
+  
+  .apple-heading {
+    @apply font-bold tracking-tight text-white mb-2;
+  }
+}
+
+body {
+  @apply text-white antialiased min-h-screen overflow-x-hidden m-0 p-0 select-none;
+  background-color: #000000;
+  color-scheme: dark;
+}
+
+/* Force dark theme */
+.telegram-theme-bg {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* Hide scrollbars completely */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+code {
+  @apply select-all font-mono bg-white/10 px-1.5 py-0.5 rounded-md text-[#0A84FF];
+}
+
+.emoji-flag {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+}
+

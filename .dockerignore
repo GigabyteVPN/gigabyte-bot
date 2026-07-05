@@ -1,0 +1,9 @@
+venv
+.git
+certs
+webapp/node_modules
+webapp/dist
+**/.env
+**/.env.local
+**/*.pyc
+__pycache__
