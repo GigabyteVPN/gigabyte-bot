@@ -81,7 +81,7 @@ function TicketThread({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-        className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] pt-5 px-5 pb-8 border-t border-white/10 flex flex-col h-[80vh]"
+        className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] pt-5 px-5 pb-8 border-t border-white/10 flex flex-col h-[80vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-3 shrink-0">
@@ -132,7 +132,7 @@ function TicketThread({
               <button
                 onClick={send}
                 disabled={busy || !reply.trim()}
-                className="w-12 h-12 bg-[#0A84FF] rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-40 shrink-0"
+                className="w-12 h-12 btn-primary rounded-full flex items-center justify-center active:scale-90 transition-transform disabled:opacity-40 shrink-0"
               >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin text-white" /> : <Send className="w-5 h-5 text-white" />}
               </button>
@@ -226,7 +226,7 @@ export default function Support() {
             hapticFeedback.selectionChanged();
             setNewOpen(true);
           }}
-          className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+          className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
         >
           <div className="w-12 h-12 bg-[#0A84FF]/15 rounded-full flex items-center justify-center border border-[#0A84FF]/30 shrink-0">
             <MessageSquarePlus className="w-6 h-6 text-[#0A84FF]" />
@@ -243,7 +243,7 @@ export default function Support() {
             hapticFeedback.selectionChanged();
             setCountryOpen(true);
           }}
-          className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+          className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
         >
           <div className="w-12 h-12 bg-[#32D74B]/15 rounded-full flex items-center justify-center border border-[#32D74B]/30 shrink-0">
             <Globe className="w-6 h-6 text-[#32D74B]" />
@@ -263,7 +263,7 @@ export default function Support() {
             <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
           </div>
         ) : tickets.length === 0 ? (
-          <div className="ios-list p-8 text-center bg-[#1C1C1E]">
+          <div className="ios-list p-8 text-center glass">
             <div className="w-14 h-14 bg-[#2C2C2E] rounded-full flex items-center justify-center mx-auto mb-4 border border-white/[0.08]">
               <LifeBuoy className="w-7 h-7 text-[#8E8E93]" />
             </div>
@@ -271,7 +271,7 @@ export default function Support() {
             <div className="text-[14px] text-[#8E8E93]">Если возникнет вопрос — напишите нам.</div>
           </div>
         ) : (
-          <div className="ios-list bg-[#1C1C1E] border-[0.5px] border-white/5 overflow-hidden">
+          <div className="ios-list overflow-hidden">
             {tickets.map((t) => {
               const last = t.messages[t.messages.length - 1];
               return (
@@ -318,7 +318,7 @@ export default function Support() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-              className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
+              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-[20px] font-bold text-white mb-1">✍️ Опишите проблему</h3>
@@ -334,7 +334,7 @@ export default function Support() {
               <button
                 onClick={createTicket}
                 disabled={busy || !newText.trim()}
-                className="w-full py-4 bg-[#0A84FF] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 Отправить
@@ -359,7 +359,7 @@ export default function Support() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-              className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10 max-h-[80vh] overflow-y-auto hidden-scrollbar"
+              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10 max-h-[80vh] overflow-y-auto hidden-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-[20px] font-bold text-white mb-1">🌍 Новая страна</h3>

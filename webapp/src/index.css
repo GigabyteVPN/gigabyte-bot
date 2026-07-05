@@ -16,51 +16,144 @@
     animation: pop 150ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
-  .glass-panel {
-    @apply bg-[#1C1C1E]/80 backdrop-blur-xl border border-transparent shadow-none;
+  @keyframes float-slow {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(30px, -25px) scale(1.08); }
   }
 
-  .ios-list {
-    @apply bg-[#1C1C1E] rounded-[38px] overflow-hidden;
+  @keyframes float-slower {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-35px, 30px) scale(1.05); }
   }
-  
+
+  /* ---------- Стеклянные поверхности (liquid glass) ---------- */
+
+  /* Основная карточка */
+  .glass {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
+    -webkit-backdrop-filter: blur(28px) saturate(1.6);
+    backdrop-filter: blur(28px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+
+  /* Приглушённое стекло для вложенных элементов */
+  .glass-inner {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  /* Плотное стекло для модалок и bottom-sheet */
+  .glass-sheet {
+    background: linear-gradient(165deg, rgba(44, 44, 48, 0.86), rgba(20, 20, 24, 0.92));
+    -webkit-backdrop-filter: blur(44px) saturate(1.8);
+    backdrop-filter: blur(44px) saturate(1.8);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -8px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  /* Кнопки */
+  .btn-primary {
+    background: linear-gradient(180deg, #2E9BFF 0%, #0A84FF 55%, #0070E8 100%);
+    box-shadow:
+      0 10px 24px rgba(10, 132, 255, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .btn-danger {
+    background: linear-gradient(180deg, #FF6157 0%, #FF453A 60%, #E5342A 100%);
+    box-shadow:
+      0 10px 24px rgba(255, 69, 58, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.30);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .btn-glass {
+    background: rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+
+  /* Иконка-«приложение» в стиле iOS */
+  .app-icon {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      0 6px 16px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  /* ---------- Списки в стиле iOS ---------- */
+  .ios-list {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
+    -webkit-backdrop-filter: blur(28px) saturate(1.6);
+    backdrop-filter: blur(28px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    border-radius: 32px;
+    overflow: hidden;
+  }
+
   .ios-list-item {
-    @apply flex items-center justify-between p-4 bg-transparent active:bg-[#2C2C2E]/80 transition-colors border-0 text-left relative;
+    @apply flex items-center justify-between p-4 bg-transparent active:bg-white/[0.06] transition-colors border-0 text-left relative;
   }
 
   .ios-list-item:not(:last-child)::after {
     content: '';
     position: absolute;
     bottom: 0;
-    right: 3rem;
+    right: 1.25rem;
     left: 4.5rem;
     height: 1px;
-    background-color: rgba(60, 60, 64, 0.8);
-  }
-
-  .glass-button {
-    @apply bg-[#2C2C2E] hover:bg-[#3A3A3D] active:bg-white/[0.05] transition-all duration-300 font-semibold text-white shadow-sm;
-  }
-
-  .glass-button-primary {
-    @apply bg-[#0A84FF] hover:bg-[#007AFF] active:bg-[#0066CC] transition-all duration-300 font-semibold text-white shadow-sm;
-  }
-  
-  .apple-heading {
-    @apply font-bold tracking-tight text-white mb-2;
+    background-color: rgba(255, 255, 255, 0.07);
   }
 }
 
 body {
   @apply text-white antialiased min-h-screen overflow-x-hidden m-0 p-0 select-none;
-  background-color: #000000;
+  background-color: #050507;
   color-scheme: dark;
+  position: relative;
 }
 
-/* Force dark theme */
-.telegram-theme-bg {
-  background-color: #000000 !important;
-  color: #ffffff !important;
+/* ---------- Атмосферные свечения фона ---------- */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::before {
+  width: 420px;
+  height: 420px;
+  top: -140px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(10, 132, 255, 0.22), transparent 65%);
+  animation: float-slow 18s ease-in-out infinite;
+}
+
+body::after {
+  width: 460px;
+  height: 460px;
+  bottom: -160px;
+  left: -140px;
+  background: radial-gradient(circle, rgba(191, 90, 242, 0.14), transparent 65%);
+  animation: float-slower 22s ease-in-out infinite;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 /* Hide scrollbars completely */
@@ -68,8 +161,8 @@ body {
   display: none;
 }
 * {
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 code {
@@ -79,4 +172,3 @@ code {
 .emoji-flag {
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
 }
-

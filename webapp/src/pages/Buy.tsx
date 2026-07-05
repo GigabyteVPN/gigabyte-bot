@@ -240,13 +240,13 @@ export default function Buy() {
           <div className="flex flex-col gap-2.5 w-full mt-4">
             <button
               onClick={() => navigate('/')}
-              className="w-full py-4 bg-[#0A84FF] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
+              className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
             >
               Перейти в Дашборд
             </button>
             <button
               onClick={() => navigate('/instructions')}
-              className="w-full py-4 bg-white/[0.08] rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
+              className="w-full py-4 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
             >
               📱 Как подключиться
             </button>
@@ -268,7 +268,7 @@ export default function Buy() {
               hapticFeedback.selectionChanged();
               setStep('server');
             }}
-            className="ios-list bg-gradient-to-br from-[#0A84FF]/25 to-[#1C1C1E] border border-[#0A84FF]/25 p-5 text-left relative overflow-hidden active:scale-[0.99] transition-transform"
+            className="ios-list bg-gradient-to-br from-[#0A84FF]/30 via-[#5E5CE6]/15 to-transparent border border-[#0A84FF]/30 shadow-[0_12px_48px_rgba(10,132,255,0.2)] p-5 text-left relative overflow-hidden active:scale-[0.99] transition-transform"
           >
             <div className="absolute top-0 right-0 w-40 h-40 bg-[#0A84FF]/15 blur-3xl rounded-full pointer-events-none" />
             <div className="text-[22px] font-bold text-white mb-1">🛒 Купить подписку</div>
@@ -287,7 +287,7 @@ export default function Buy() {
                 hapticFeedback.selectionChanged();
                 setTrialOpen(true);
               }}
-              className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 text-left active:scale-[0.99] transition-transform"
+              className="ios-list p-5 text-left active:scale-[0.99] transition-transform"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-yellow-500/15 rounded-full flex items-center justify-center border border-yellow-500/30 shrink-0">
@@ -307,7 +307,7 @@ export default function Buy() {
               hapticFeedback.selectionChanged();
               setPromoOpen(true);
             }}
-            className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 text-left active:scale-[0.99] transition-transform"
+            className="ios-list p-5 text-left active:scale-[0.99] transition-transform"
           >
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-[#BF5AF2]/15 rounded-full flex items-center justify-center border border-[#BF5AF2]/30 shrink-0">
@@ -325,7 +325,7 @@ export default function Buy() {
             href="https://t.me/PremiumBot"
             target="_blank"
             rel="noreferrer"
-            className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 text-left active:scale-[0.99] transition-transform block"
+            className="ios-list p-5 text-left active:scale-[0.99] transition-transform block"
           >
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-[#0A84FF]/15 rounded-full flex items-center justify-center border border-[#0A84FF]/30 shrink-0">
@@ -345,7 +345,7 @@ export default function Buy() {
       {step === 'server' && (
         <>
           <Header title="Выберите страну" />
-          <div className="ios-list bg-[#1C1C1E] border-[0.5px] border-white/5 overflow-hidden">
+          <div className="ios-list overflow-hidden">
             {activeServers.length === 0 && (
               <div className="p-6 text-center text-[#8E8E93] text-[15px]">Нет доступных серверов</div>
             )}
@@ -387,7 +387,7 @@ export default function Buy() {
                   setTariff(t);
                   setStep('method');
                 }}
-                className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center justify-between active:scale-[0.99] transition-transform"
+                className="ios-list p-5 flex items-center justify-between active:scale-[0.99] transition-transform"
               >
                 <div className="text-left">
                   <div className="text-[19px] font-bold text-white">{t.label}</div>
@@ -406,7 +406,7 @@ export default function Buy() {
       {step === 'method' && tariff && (
         <>
           <Header title="Способ оплаты" />
-          <div className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-4 mb-1">
+          <div className="ios-list p-4 mb-1">
             <div className="flex justify-between items-center">
               <span className="text-[15px] text-[#8E8E93]">
                 {isExtend ? 'Продление' : server ? `${server.flag ?? ''} ${server.name}` : ''} · {tariff.label}
@@ -417,7 +417,7 @@ export default function Buy() {
           <button
             onClick={payWithStars}
             disabled={busy}
-            className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center gap-4 active:scale-[0.99] transition-transform disabled:opacity-60"
+            className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform disabled:opacity-60"
           >
             <div className="w-12 h-12 bg-[#0A84FF]/15 rounded-full flex items-center justify-center border border-[#0A84FF]/30 shrink-0">
               {busy ? <Loader2 className="w-6 h-6 text-[#0A84FF] animate-spin" /> : <Star className="w-6 h-6 text-[#0A84FF]" />}
@@ -433,7 +433,7 @@ export default function Buy() {
               hapticFeedback.selectionChanged();
               setStep('crypto_currency');
             }}
-            className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+            className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
           >
             <div className="w-12 h-12 bg-[#32D74B]/15 rounded-full flex items-center justify-center border border-[#32D74B]/30 shrink-0">
               <Bitcoin className="w-6 h-6 text-[#32D74B]" />
@@ -457,7 +457,7 @@ export default function Buy() {
               key={c}
               onClick={() => createCryptoOrder(c)}
               disabled={busy}
-              className="ios-list bg-[#1C1C1E] border border-white/[0.06] p-5 flex items-center gap-4 active:scale-[0.99] transition-transform disabled:opacity-60"
+              className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform disabled:opacity-60"
             >
               <div
                 className={cn(
@@ -520,7 +520,7 @@ export default function Buy() {
             <button
               onClick={submitHash}
               disabled={verifying || !/^0x[0-9a-fA-F]{64}$/.test(txHash.trim())}
-              className="w-full py-4 bg-[#0A84FF] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+              className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
             >
               {verifying ? (
                 <>
@@ -554,7 +554,7 @@ export default function Buy() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-              className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10 max-h-[75vh] overflow-y-auto hidden-scrollbar"
+              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10 max-h-[75vh] overflow-y-auto hidden-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-[20px] font-bold text-white mb-1">🎁 Пробная неделя</h3>
@@ -594,7 +594,7 @@ export default function Buy() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-              className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
+              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-[20px] font-bold text-white mb-1">🔑 Активация ключа</h3>
@@ -611,7 +611,7 @@ export default function Buy() {
               <button
                 onClick={activatePromo}
                 disabled={busy || !/^GIFT-[0-9A-F]{16}$/.test(promoCode.trim())}
-                className="w-full py-4 bg-[#BF5AF2] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-2xl text-white font-bold bg-gradient-to-b from-[#D07BFF] to-[#A845E8] shadow-[0_10px_24px_rgba(191,90,242,0.35)] border border-white/15 text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
                 Активировать

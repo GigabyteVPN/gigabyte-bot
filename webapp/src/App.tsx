@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ShieldCheck, FileText, Lock, WifiOff } from 'lucide-react';
-import { BottomNav } from './components/layout/BottomNav';
+import { ShieldCheck, FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy } from 'lucide-react';
+import { BottomNav, NavTab } from './components/layout/BottomNav';
 import { initTelegramApp, tg, hapticFeedback } from './lib/telegram';
 import { api, Bootstrap, ApiError } from './lib/api';
 import { AppContext } from './lib/AppContext';
@@ -10,11 +10,11 @@ import Dashboard from './pages/Dashboard';
 import Buy from './pages/Buy';
 import Instructions from './pages/Instructions';
 import Support from './pages/Support';
-import Admin from './pages/Admin';
+import AdminApp from './pages/Admin';
 
 function Spinner() {
   return (
-    <div className="flex items-center justify-center min-h-screen bg-black">
+    <div className="flex items-center justify-center min-h-screen">
       <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
     </div>
   );
@@ -22,15 +22,15 @@ function Spinner() {
 
 function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black px-8 text-center gap-4">
-      <div className="w-16 h-16 bg-[#FF453A]/15 rounded-full flex items-center justify-center border border-[#FF453A]/30">
+    <div className="flex flex-col items-center justify-center min-h-screen px-8 text-center gap-4">
+      <div className="w-16 h-16 glass rounded-full flex items-center justify-center">
         <WifiOff className="w-8 h-8 text-[#FF453A]" />
       </div>
       <div className="text-[19px] font-semibold text-white">Не удалось подключиться</div>
       <div className="text-[15px] text-[#8E8E93]">{message}</div>
       <button
         onClick={onRetry}
-        className="mt-2 px-8 py-3 bg-[#0A84FF] rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
+        className="mt-2 px-8 py-3 btn-primary rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
       >
         Повторить
       </button>
@@ -54,10 +54,10 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col justify-end px-5 pb-10 pt-16">
+    <div className="min-h-screen flex flex-col justify-end px-5 pb-10 pt-16">
       <div className="flex-1 flex flex-col items-center justify-center text-center gap-5">
-        <div className="w-20 h-20 bg-[#0A84FF]/15 rounded-[28px] flex items-center justify-center border border-[#0A84FF]/30 shadow-[0_8px_40px_rgba(10,132,255,0.25)]">
-          <ShieldCheck className="w-10 h-10 text-[#0A84FF]" />
+        <div className="w-20 h-20 app-icon rounded-[28px] flex items-center justify-center bg-gradient-to-b from-[#2E9BFF]/40 to-[#0A84FF]/20 shadow-[0_8px_40px_rgba(10,132,255,0.35)]">
+          <ShieldCheck className="w-10 h-10 text-[#4DA6FF]" />
         </div>
         <h1 className="text-[30px] font-bold tracking-tight text-white">
           Добро пожаловать <br /> в Gigabyte
@@ -76,7 +76,7 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
           href={boot.offer_url}
           target="_blank"
           rel="noreferrer"
-          className="ios-list-item bg-[#1C1C1E] rounded-2xl flex items-center gap-3 !justify-start"
+          className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
         >
           <FileText className="w-5 h-5 text-[#0A84FF] shrink-0" />
           <span className="text-[16px] text-white font-medium">Публичная оферта</span>
@@ -85,7 +85,7 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
           href={boot.privacy_url}
           target="_blank"
           rel="noreferrer"
-          className="ios-list-item bg-[#1C1C1E] rounded-2xl flex items-center gap-3 !justify-start"
+          className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
         >
           <Lock className="w-5 h-5 text-[#0A84FF] shrink-0" />
           <span className="text-[16px] text-white font-medium">Политика конфиденциальности</span>
@@ -93,7 +93,7 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
         <button
           onClick={accept}
           disabled={busy}
-          className="w-full py-4 bg-[#0A84FF] rounded-2xl text-white font-bold text-[17px] active:scale-[0.98] transition-transform disabled:opacity-60 mt-2"
+          className="w-full py-4 btn-primary rounded-3xl text-white font-bold text-[17px] active:scale-[0.98] transition-transform disabled:opacity-60 mt-2"
         >
           {busy ? 'Секунду…' : '✅ Принять и продолжить'}
         </button>
@@ -104,6 +104,13 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
     </div>
   );
 }
+
+const USER_TABS: NavTab[] = [
+  { path: '/', icon: User, label: 'Дашборд' },
+  { path: '/buy', icon: ShoppingBag, label: 'Купить' },
+  { path: '/instructions', icon: BookOpen, label: 'Гайды' },
+  { path: '/support', icon: LifeBuoy, label: 'Помощь' },
+];
 
 export default function App() {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
@@ -131,8 +138,8 @@ export default function App() {
     initTelegramApp();
     try {
       if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
-        if (tg.setHeaderColor) tg.setHeaderColor('#000000');
-        if (tg.setBackgroundColor) tg.setBackgroundColor('#000000');
+        if (tg.setHeaderColor) tg.setHeaderColor('#050507');
+        if (tg.setBackgroundColor) tg.setBackgroundColor('#050507');
       }
     } catch (e) {}
     load();
@@ -149,7 +156,7 @@ export default function App() {
     <AppContext.Provider value={{ boot, refreshBoot: load }}>
       <HashRouter>
         <div
-          className="min-h-screen bg-black text-white"
+          className="min-h-screen text-white"
           style={{
             paddingTop: 'max(var(--tg-safe-area-inset-top, env(safe-area-inset-top)), 56px)',
             paddingBottom: 'max(var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom)), 128px)',
@@ -157,15 +164,21 @@ export default function App() {
             paddingRight: 'var(--tg-safe-area-inset-right, env(safe-area-inset-right))',
           }}
         >
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/buy" element={<Buy />} />
-            <Route path="/instructions" element={<Instructions />} />
-            <Route path="/support" element={<Support />} />
-            {boot.is_admin && <Route path="/admin" element={<Admin />} />}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-          <BottomNav isAdmin={boot.is_admin} />
+          {boot.is_admin ? (
+            // Администратор видит ТОЛЬКО админ-приложение
+            <AdminApp />
+          ) : (
+            <>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/buy" element={<Buy />} />
+                <Route path="/instructions" element={<Instructions />} />
+                <Route path="/support" element={<Support />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+              <BottomNav tabs={USER_TABS} />
+            </>
+          )}
         </div>
       </HashRouter>
     </AppContext.Provider>

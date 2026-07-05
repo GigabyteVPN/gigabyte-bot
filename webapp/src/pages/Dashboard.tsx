@@ -238,7 +238,7 @@ const TxHashModal = ({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-        className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
+        className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-[20px] font-bold text-white mb-2">Хеш транзакции (TXID)</h3>
@@ -256,7 +256,7 @@ const TxHashModal = ({
         <button
           onClick={submit}
           disabled={!valid || busy}
-          className="w-full py-4 bg-[#0A84FF] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+          className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
         >
           {busy ? (
             <>
@@ -388,7 +388,7 @@ export default function Dashboard() {
             <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
           </div>
         ) : subs.length === 0 ? (
-          <div className="ios-list p-8 text-center bg-[#1C1C1E] border border-white/[0.04]">
+          <div className="ios-list p-8 text-center">
             <div className="w-14 h-14 bg-[#2C2C2E] rounded-full flex items-center justify-center mx-auto mb-4 border border-white/[0.08]">
               <Clock className="w-7 h-7 text-[#8E8E93]" />
             </div>
@@ -398,7 +398,7 @@ export default function Dashboard() {
             </div>
             <button
               onClick={() => navigate('/buy')}
-              className="px-8 py-3 bg-[#0A84FF] rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
+              className="px-8 py-3 btn-primary rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
             >
               🛒 Купить подписку
             </button>
@@ -410,7 +410,7 @@ export default function Dashboard() {
               return (
                 <div
                   key={sub.id}
-                  className="ios-list bg-[#1C1C1E] shadow-sm border-[0.5px] border-white/5 overflow-hidden relative group"
+                  className="ios-list overflow-hidden relative group"
                 >
                   <div className="p-5 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#0A84FF]/10 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
@@ -530,7 +530,7 @@ export default function Dashboard() {
           <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4">
             Ожидающие платежи
           </h2>
-          <div className="ios-list bg-[#1C1C1E] border-[0.5px] border-white/5 overflow-hidden">
+          <div className="ios-list overflow-hidden">
             {pending.map((p, index) => (
               <div
                 key={p.id}
@@ -566,14 +566,14 @@ export default function Dashboard() {
                 {p.status === 'pending_stars' ? (
                   <button
                     onClick={() => payStars(p)}
-                    className="w-full py-3 bg-[#0A84FF] rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    className="w-full py-3 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                   >
                     <Star className="w-4 h-4" /> Оплатить Stars
                   </button>
                 ) : (
                   <button
                     onClick={() => setHashPayment(p)}
-                    className="w-full py-3 bg-[#0A84FF] rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                    className="w-full py-3 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                   >
                     <Send className="w-4 h-4" /> Отправить TXID
                   </button>
@@ -586,7 +586,7 @@ export default function Dashboard() {
 
       {/* ---- История ---- */}
       <section>
-        <div className="ios-list bg-[#1C1C1E] border-[0.5px] border-white/5 overflow-hidden">
+        <div className="ios-list overflow-hidden">
           <button
             onClick={() => {
               hapticFeedback.selectionChanged();
@@ -608,7 +608,7 @@ export default function Dashboard() {
       {/* ---- Документы и аккаунт ---- */}
       <section>
         <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4">Аккаунт</h2>
-        <div className="ios-list bg-[#1C1C1E] border-[0.5px] border-white/5 overflow-hidden">
+        <div className="ios-list overflow-hidden">
           <a href={boot.offer_url} target="_blank" rel="noreferrer" className="ios-list-item w-full">
             <div className="flex items-center gap-4">
               <FileText className="w-5 h-5 text-[#0A84FF]" />
@@ -674,7 +674,7 @@ export default function Dashboard() {
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.9 }}
-              className="bg-[#1C1C1E] rounded-[28px] p-6 w-full max-w-[360px] border border-white/10"
+              className="glass-sheet rounded-[32px] p-6 w-full max-w-[360px] border border-white/10"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex flex-col items-center text-center gap-3 mb-5">
@@ -690,13 +690,13 @@ export default function Dashboard() {
               <div className="flex flex-col gap-2.5">
                 <button
                   onClick={deleteAccount}
-                  className="w-full py-3.5 bg-[#FF453A] rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
+                  className="w-full py-3.5 btn-danger rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
                 >
                   Да, удалить навсегда
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className="w-full py-3.5 bg-white/[0.08] rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
+                  className="w-full py-3.5 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
                 >
                   Отмена
                 </button>
@@ -731,7 +731,7 @@ export default function Dashboard() {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: '100%', opacity: 0.5 }}
               transition={{ type: 'spring', damping: 30, stiffness: 250, mass: 1 }}
-              className="w-full max-w-[440px] bg-[#1C1C1E] rounded-t-[32px] sm:rounded-[40px] pb-5 pt-5 px-6 shadow-[0_-8px_60px_rgba(0,0,0,0.7)] flex flex-col h-[78vh] sm:h-[70vh] border-t border-white/10 sm:border relative"
+              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[40px] pb-5 pt-5 px-6 shadow-[0_-8px_60px_rgba(0,0,0,0.7)] flex flex-col h-[78vh] sm:h-[70vh] border-t border-white/10 sm:border relative"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/20 rounded-full sm:hidden z-30 pointer-events-none"></div>
@@ -755,7 +755,7 @@ export default function Dashboard() {
                     {history.map((p) => (
                       <div
                         key={p.id}
-                        className="bg-[#1C1C1E] sm:bg-[#2C2C2E]/40 border border-white/[0.05] rounded-2xl overflow-hidden mb-4 shadow-sm"
+                        className="glass border border-white/[0.05] rounded-2xl overflow-hidden mb-4 shadow-sm"
                       >
                         <div className="p-4 border-b border-white/[0.05] flex justify-between items-center bg-white/[0.02]">
                           <div className="flex items-center gap-3.5">

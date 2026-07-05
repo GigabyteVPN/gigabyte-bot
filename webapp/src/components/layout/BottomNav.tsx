@@ -1,22 +1,19 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { User, ShoppingBag, Shield, BookOpen, LifeBuoy } from 'lucide-react';
 import { usePopAnimation } from '../../hooks/usePopAnimation';
 import { hapticFeedback } from '../../lib/telegram';
 
-interface BottomNavProps {
-  isAdmin?: boolean;
-}
-
-const ICONS: Record<string, React.ElementType> = {
-  Profile: User,
-  Buy: ShoppingBag,
-  Guides: BookOpen,
-  Support: LifeBuoy,
-  Admin: Shield,
+export type NavTab = {
+  path: string;
+  icon: React.ElementType;
+  label: string;
 };
 
-export const BottomNav: React.FC<BottomNavProps> = ({ isAdmin }) => {
+interface BottomNavProps {
+  tabs: NavTab[];
+}
+
+export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
@@ -35,17 +32,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({ isAdmin }) => {
   const navRef = useRef<HTMLDivElement>(null);
   const scaleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [indicatorStyle, setIndicatorStyle] = useState({});
-
-  const tabs = [
-    { path: '/', icon: 'Profile', label: 'Дашборд' },
-    { path: '/buy', icon: 'Buy', label: 'Купить' },
-    { path: '/instructions', icon: 'Guides', label: 'Гайды' },
-    { path: '/support', icon: 'Support', label: 'Помощь' },
-  ];
-
-  if (isAdmin) {
-    tabs.push({ path: '/admin', icon: 'Admin', label: 'Админ' });
-  }
 
   useEffect(() => {
     const updatePillPosition = () => {
@@ -95,20 +81,29 @@ export const BottomNav: React.FC<BottomNavProps> = ({ isAdmin }) => {
     <div className="fixed bottom-0 left-0 right-0 z-[100] pointer-events-none flex justify-center pb-[env(safe-area-inset-bottom)] mb-3">
       <div
         ref={navRef}
-        className="w-[calc(94%-16px)] max-w-[400px] pointer-events-auto relative bg-[#1C1C1E]/60 backdrop-blur-[15px] border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.5)]"
-        style={{ height: '54px', borderRadius: '27px' }}
+        className="w-[calc(94%-16px)] max-w-[420px] pointer-events-auto relative"
+        style={{
+          height: '58px',
+          borderRadius: '29px',
+          background: 'linear-gradient(145deg, rgba(50,50,56,0.55), rgba(18,18,22,0.65))',
+          backdropFilter: 'blur(32px) saturate(1.8)',
+          WebkitBackdropFilter: 'blur(32px) saturate(1.8)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.14)',
+        }}
       >
         <div
-          className="absolute top-[3px] bottom-[3px] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          className="absolute top-[4px] bottom-[4px] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
           style={{ ...indicatorStyle, left: 0 }}
         >
           <div
             className={`w-full h-full rounded-full ${poppingTab ? 'animate-pop-150' : ''}`}
             style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.12)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.08))',
               backdropFilter: 'blur(10px)',
               WebkitBackdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
             }}
           />
         </div>
@@ -116,7 +111,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ isAdmin }) => {
         <div className="flex items-center justify-around h-full px-0.5 relative z-10 w-full">
           {tabs.map((tab) => {
             const isActive = currentPath === tab.path;
-            const IconElement = ICONS[tab.icon];
+            const IconElement = tab.icon;
             return (
               <button
                 key={tab.path}
@@ -130,12 +125,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({ isAdmin }) => {
                 style={{ WebkitTapHighlightColor: 'transparent', touchAction: 'none' }}
               >
                 <div
-                  className={`transition-all duration-300 ease-out flex items-center justify-center ${isActive ? 'text-[#0A84FF] scale-125' : 'text-white/40'}`}
+                  className={`transition-all duration-300 ease-out flex items-center justify-center ${isActive ? 'text-[#4DA6FF] scale-125 drop-shadow-[0_0_8px_rgba(10,132,255,0.6)]' : 'text-white/40'}`}
                 >
                   <IconElement size={20} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'opacity-100' : 'opacity-60'} />
                 </div>
                 <span
-                  className={`text-[10px] block w-full text-center font-bold tracking-wide transition-all duration-300 mt-1 ${isActive ? 'text-[#0A84FF] scale-110' : 'text-white/40'}`}
+                  className={`text-[10px] block w-full text-center font-bold tracking-wide transition-all duration-300 mt-1 ${isActive ? 'text-[#4DA6FF] scale-110' : 'text-white/40'}`}
                 >
                   {tab.label}
                 </span>
