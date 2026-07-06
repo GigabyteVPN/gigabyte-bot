@@ -87,6 +87,21 @@
     border: 1px solid rgba(255, 255, 255, 0.14);
   }
 
+  /* ---------- Пузыри чата в стиле Telegram ---------- */
+  .chat-in {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px 18px 18px 6px;
+  }
+
+  .chat-out {
+    background: linear-gradient(180deg, #2E9BFF 0%, #0A84FF 60%, #0074EE 100%);
+    box-shadow: 0 4px 14px rgba(10, 132, 255, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    border-radius: 18px 18px 6px 18px;
+  }
+
   /* ---------- Списки в стиле iOS ---------- */
   .ios-list {
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));

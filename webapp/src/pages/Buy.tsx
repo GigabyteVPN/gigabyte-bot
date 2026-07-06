@@ -20,7 +20,7 @@ import {
   Loader2,
 } from 'lucide-react';
 
-type Step = 'start' | 'server' | 'tariff' | 'method' | 'crypto_currency' | 'crypto_pay' | 'success';
+type Step = 'start' | 'server' | 'tariff' | 'method' | 'crypto_currency' | 'crypto_pay' | 'promo' | 'success';
 
 const CopyRow = ({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) => {
   const [copied, setCopied] = useState(false);
@@ -63,7 +63,6 @@ export default function Buy() {
   const [verifying, setVerifying] = useState(false);
   const [successLink, setSuccessLink] = useState<string | null>(null);
   const [successText, setSuccessText] = useState('');
-  const [promoOpen, setPromoOpen] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [trialOpen, setTrialOpen] = useState(false);
 
@@ -189,7 +188,6 @@ export default function Buy() {
       hapticFeedback.notificationOccurred('success');
       setSuccessLink(res.sub_link);
       setSuccessText(`🎉 Ключ активирован! Срок: ${res.label}.`);
-      setPromoOpen(false);
       setStep('success');
     } catch (e) {
       fail(e);
@@ -205,6 +203,7 @@ export default function Buy() {
     else if (step === 'method') setStep('tariff');
     else if (step === 'crypto_currency') setStep('method');
     else if (step === 'crypto_pay') setStep('crypto_currency');
+    else if (step === 'promo') setStep('start');
     if (isExtend && step === 'tariff') navigate('/');
   };
 
@@ -222,7 +221,7 @@ export default function Buy() {
   // ================== ЭКРАН УСПЕХА ==================
   if (step === 'success') {
     return (
-      <div className="px-4 pt-10 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
+      <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
         <div className="flex flex-col items-center text-center gap-4 pt-10">
           <div className="w-20 h-20 bg-[#32D74B]/15 rounded-full flex items-center justify-center border border-[#32D74B]/30 shadow-[0_8px_40px_rgba(50,215,75,0.25)]">
             <PartyPopper className="w-10 h-10 text-[#32D74B]" />
@@ -257,7 +256,7 @@ export default function Buy() {
   }
 
   return (
-    <div className="px-4 pt-10 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
       {/* ================== СТАРТ ================== */}
       {step === 'start' && (
         <>
@@ -305,7 +304,7 @@ export default function Buy() {
           <button
             onClick={() => {
               hapticFeedback.selectionChanged();
-              setPromoOpen(true);
+              setStep('promo');
             }}
             className="ios-list p-5 text-left active:scale-[0.99] transition-transform"
           >
@@ -539,6 +538,39 @@ export default function Buy() {
         </>
       )}
 
+      {/* ================== АКТИВАЦИЯ КЛЮЧА (страница) ================== */}
+      {step === 'promo' && (
+        <>
+          <Header title="Активация ключа" />
+          <div className="flex flex-col items-center text-center gap-4 pt-4 pb-2">
+            <div className="w-20 h-20 app-icon rounded-[28px] bg-gradient-to-b from-[#D07BFF]/45 to-[#A845E8]/15 flex items-center justify-center shadow-[0_8px_40px_rgba(191,90,242,0.3)]">
+              <KeyRound className="w-10 h-10 text-[#D07BFF]" />
+            </div>
+            <div className="text-[15px] text-[#8E8E93] max-w-[300px]">
+              Введите промокод, полученный у администратора или в рамках акции — подписка активируется мгновенно.
+            </div>
+          </div>
+          <input
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+            placeholder="GIFT-ABCD1234EFGH5678"
+            className="w-full h-[54px] glass rounded-full px-6 text-[16px] font-mono text-white placeholder:text-white/25 focus:outline-none text-center uppercase tracking-wider"
+            autoFocus
+          />
+          <button
+            onClick={activatePromo}
+            disabled={busy || !/^GIFT-[0-9A-F]{16}$/.test(promoCode.trim())}
+            className="w-full py-4 rounded-full text-white font-bold text-[16px] bg-gradient-to-b from-[#D07BFF] to-[#A845E8] shadow-[0_10px_24px_rgba(191,90,242,0.35)] border border-white/15 active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+          >
+            {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
+            Активировать ключ
+          </button>
+          <div className="text-[12px] text-[#8E8E93]/70 text-center px-8">
+            Формат ключа: GIFT- и 16 символов. Ключ одноразовый и привязывается к вашему аккаунту.
+          </div>
+        </>
+      )}
+
       {/* ================== МОДАЛКА ТРИАЛА ================== */}
       <AnimatePresence>
         {trialOpen && (
@@ -579,47 +611,6 @@ export default function Buy() {
         )}
       </AnimatePresence>
 
-      {/* ================== МОДАЛКА ПРОМОКОДА ================== */}
-      <AnimatePresence>
-        {promoOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md"
-            onClick={() => !busy && setPromoOpen(false)}
-          >
-            <motion.div
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="text-[20px] font-bold text-white mb-1">🔑 Активация ключа</h3>
-              <p className="text-[14px] text-[#8E8E93] mb-4">
-                Введите промокод, полученный у администратора или в рамках акции.
-              </p>
-              <input
-                value={promoCode}
-                onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                placeholder="GIFT-ABCD1234EFGH5678"
-                className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3.5 text-[15px] font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-[#BF5AF2]/60 mb-4 uppercase"
-                autoFocus
-              />
-              <button
-                onClick={activatePromo}
-                disabled={busy || !/^GIFT-[0-9A-F]{16}$/.test(promoCode.trim())}
-                className="w-full py-4 rounded-2xl text-white font-bold bg-gradient-to-b from-[#D07BFF] to-[#A845E8] shadow-[0_10px_24px_rgba(191,90,242,0.35)] border border-white/15 text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
-              >
-                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
-                Активировать
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

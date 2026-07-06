@@ -50,12 +50,10 @@ export const initTelegramApp = () => {
     }
   } catch (e) {}
 
-  // Подтверждение при закрытии, чтобы случайный жест не выкинул из приложения.
-  try {
-    if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.2') && t.enableClosingConfirmation) {
-      t.enableClosingConfirmation();
-    }
-  } catch (e) {}
+  // Диалог подтверждения закрытия НЕ включаем: его системный текст
+  // («изменения могут быть потеряны») нельзя заменить своим, а случайное
+  // закрытие уже исключено отключением вертикальных свайпов выше —
+  // приложение закрывается только штатной кнопкой.
 
   document.documentElement.className = tg.colorScheme || 'dark';
 };

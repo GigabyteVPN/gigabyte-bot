@@ -18,6 +18,8 @@ import {
   Zap,
   QrCode,
   BellPlus,
+  Wallet2,
+  ChevronLeft,
   Star,
   Trash2,
   Send,
@@ -248,18 +250,53 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
 };
 
 // Модалка отправки TXID для крипто-платежа
-const TxHashModal = ({
+// Копируемая строка реквизитов
+const PayCopyRow = ({ label, value }: { label: string; value: string }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider px-2">{label}</span>
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(value);
+          hapticFeedback.selectionChanged();
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1800);
+        }}
+        className="glass-inner rounded-3xl px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+      >
+        <span className="flex-1 text-[14px] font-mono text-white/90 break-all">{value}</span>
+        {copied ? (
+          <Check className="w-4 h-4 text-[#32D74B] shrink-0" />
+        ) : (
+          <Copy className="w-4 h-4 text-[#0A84FF] shrink-0" />
+        )}
+      </button>
+    </div>
+  );
+};
+
+// Полноэкранная страница оплаты для незавершённого крипто-заказа:
+// все реквизиты (QR, кошелёк, сумма, контракт) + отправка TXID.
+const CryptoPayPage = ({
   payment,
+  wallet,
+  contracts,
   onClose,
   onDone,
 }: {
   payment: Payment;
+  wallet: string;
+  contracts: { USDT: string; USDC: string };
   onClose: () => void;
   onDone: (r: HashResult) => void;
 }) => {
   const [hash, setHash] = useState('');
   const [busy, setBusy] = useState(false);
   const valid = /^0x[0-9a-fA-F]{64}$/.test(hash.trim());
+  const currency = (payment.currency as 'USDT' | 'USDC') || 'USDT';
+  const contract = contracts[currency] || contracts.USDT;
+  const amount = Number(payment.amount_usd || 0);
 
   const submit = async () => {
     if (!valid || busy) return;
@@ -275,56 +312,85 @@ const TxHashModal = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md"
-      onClick={() => !busy && onClose()}
-    >
-      <motion.div
-        initial={{ y: '100%' }}
-        animate={{ y: 0 }}
-        exit={{ y: '100%' }}
-        transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-        className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10"
-        onClick={(e) => e.stopPropagation()}
+    <div className="fixed inset-0 z-[210] flex flex-col bg-[#050507] overflow-y-auto hidden-scrollbar">
+      <div
+        className="px-4 pb-10 flex flex-col gap-5"
+        style={{
+          paddingTop:
+            'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
+        }}
       >
-        <h3 className="text-[20px] font-bold text-white mb-2">Хеш транзакции (TXID)</h3>
-        <p className="text-[14px] text-[#8E8E93] mb-4 leading-snug">
-          Скопируйте TXID из вашего криптокошелька или на arbiscan.io и вставьте сюда. Хеш начинается с 0x и содержит
-          64 символа.
-        </p>
-        <input
-          value={hash}
-          onChange={(e) => setHash(e.target.value)}
-          placeholder="0x742d35cc6634c0532925a3b8448bc4549…"
-          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3.5 text-[14px] font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-4"
-          autoFocus
-        />
-        <button
-          onClick={submit}
-          disabled={!valid || busy}
-          className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
-        >
-          {busy ? (
-            <>
-              <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
-              Проверяем в блокчейне…
-            </>
-          ) : (
-            <>
-              <Send className="w-5 h-5" /> Отправить на проверку
-            </>
-          )}
-        </button>
-        {busy && (
-          <div className="text-[12px] text-[#8E8E93] text-center mt-3">
-            Проверка занимает до 40 секунд, не закрывайте окно
+        <header className="flex items-center gap-3">
+          <button
+            onClick={() => !busy && onClose()}
+            className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          >
+            <ChevronLeft className="w-6 h-6 text-white" />
+          </button>
+          <div>
+            <h1 className="text-[24px] font-bold tracking-tight leading-tight">Оплата {currency}</h1>
+            <div className="text-[13px] text-[#8E8E93]">
+              Заказ {payment.payment_uid || payment.id} · действует 24 часа
+            </div>
           </div>
-        )}
-      </motion.div>
-    </motion.div>
+        </header>
+
+        <div className="flex flex-col items-center gap-3">
+          <div className="bg-white p-4 rounded-[28px]">
+            <QRCodeSVG value={wallet} size={168} level="M" />
+          </div>
+          <div className="text-center">
+            <div className="text-[30px] font-bold text-white font-mono leading-none">
+              {amount.toFixed(2)} {currency}
+            </div>
+            <div className="text-[13px] text-[#8E8E93] mt-1.5">
+              ≈ {Math.round(Number(payment.amount_rub || 0))} ₽ · сеть Arbitrum One
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <PayCopyRow label="Кошелёк для перевода" value={wallet} />
+          <PayCopyRow label={`Сумма (${currency})`} value={amount.toFixed(2)} />
+          <PayCopyRow label="Контракт токена" value={contract} />
+        </div>
+
+        <div className="glass rounded-3xl p-4 text-[13px] text-[#FF9F0A] leading-snug">
+          ⚠️ Отправьте точную сумму в сети Arbitrum One. После перевода вставьте TXID (хеш транзакции) ниже —
+          проверка автоматическая.
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <input
+            value={hash}
+            onChange={(e) => setHash(e.target.value)}
+            placeholder="TXID: 0x…"
+            className="w-full h-[52px] glass rounded-full px-5 text-[14px] font-mono text-white placeholder:text-white/25 focus:outline-none"
+          />
+          <button
+            onClick={submit}
+            disabled={!valid || busy}
+            className="w-full py-4 btn-primary rounded-full text-white font-bold text-[16px] active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+          >
+            {busy ? (
+              <>
+                <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
+                Проверяем в блокчейне…
+              </>
+            ) : (
+              <>
+                <Send className="w-5 h-5" /> Я оплатил — проверить
+              </>
+            )}
+          </button>
+          {busy && (
+            <div className="text-[12px] text-[#8E8E93] text-center">
+              Проверка занимает до 40 секунд, не закрывайте экран
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -446,7 +512,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="px-4 pt-10 flex flex-col gap-6 animate-in fade-in duration-500 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-500 pb-8">
       {/* ---- Подписки ---- */}
       <section>
         <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4 mt-2">
@@ -654,10 +720,13 @@ export default function Dashboard() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => setHashPayment(p)}
+                    onClick={() => {
+                      hapticFeedback.selectionChanged();
+                      setHashPayment(p);
+                    }}
                     className="w-full py-3 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                   >
-                    <Send className="w-4 h-4" /> Отправить TXID
+                    <Wallet2 className="w-4 h-4" /> Реквизиты и оплата
                   </button>
                 )}
               </div>
@@ -791,7 +860,13 @@ export default function Dashboard() {
       {/* ---- Модалка TXID ---- */}
       <AnimatePresence>
         {hashPayment && (
-          <TxHashModal payment={hashPayment} onClose={() => setHashPayment(null)} onDone={onHashDone} />
+          <CryptoPayPage
+            payment={hashPayment}
+            wallet={boot.wallet}
+            contracts={boot.contracts}
+            onClose={() => setHashPayment(null)}
+            onDone={onHashDone}
+          />
         )}
       </AnimatePresence>
 

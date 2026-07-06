@@ -1199,14 +1199,35 @@ async def check_expiry_reminders(bot_instance: Bot):
             logger.warning(f"Не удалось отправить напоминание {sub.get('user_id')}: {e}")
         await _set_reminder_stage(sub_id, target_stage)
 
+async def cleanup_stale_payments():
+    """Аннулирует «зависшие» оплаты: заказ, не оплаченный за 24 часа,
+    переводится в статус expired и убирается из «Ожидающих платежей».
+    История при этом сохраняется в БД (строка не удаляется)."""
+    await init_supabase()
+    cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+    res = await supabase.table("payments").select("id").in_(
+        "status", ["pending_crypto", "awaiting_hash", "pending_stars"]
+    ).lt("created_at", cutoff).execute()
+    stale = res.data or []
+    for p in stale:
+        await supabase.table("payments").update({"status": "expired"}).eq("id", p["id"]).execute()
+        await supabase.table("pending_confirmations").delete().eq("payment_id", p["id"]).execute()
+    if stale:
+        logger.info(f"🧹 Аннулировано {len(stale)} зависших платежей (старше 24 часов)")
+
 async def subscription_reminders_task(bot_instance: Bot):
-    """Фоновая проверка истекающих подписок каждые 10 минут."""
+    """Фоновая проверка каждые 10 минут: напоминания об истечении подписок
+    и аннулирование неоплаченных заказов старше 24 часов."""
     await asyncio.sleep(30)
     while True:
         try:
             await check_expiry_reminders(bot_instance)
         except Exception as e:
             logger.error(f"Ошибка в задаче напоминаний: {e}")
+        try:
+            await cleanup_stale_payments()
+        except Exception as e:
+            logger.error(f"Ошибка аннулирования зависших платежей: {e}")
         await asyncio.sleep(600)
 
 # ====================== БЭКАП В SUPABASE STORAGE ======================
@@ -1790,11 +1811,22 @@ async def send_terms_card(message: Message):
     )
 
 # ====================== /start ======================
+def webapp_inline_keyboard() -> Optional[InlineKeyboardMarkup]:
+    """Инлайн-кнопка запуска мини-аппа прямо под сообщением бота."""
+    webapp_url = os.getenv("WEBAPP_URL")
+    if not webapp_url:
+        return None
+    from aiogram.types import WebAppInfo
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Открыть приложение", web_app=WebAppInfo(url=webapp_url))]
+    ])
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     await load_tariffs()
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
+    app_kb = webapp_inline_keyboard()
 
     # Администратор — сразу админ-меню, без согласия и без юр-кнопок.
     if is_admin(user_id):
@@ -1803,6 +1835,11 @@ async def cmd_start(message: Message):
             parse_mode=ParseMode.HTML,
             reply_markup=admin_keyboard()
         )
+        if app_kb:
+            await message.answer(
+                "📱 Вся панель управления — в приложении: статистика, продажи, поддержка и серверы.",
+                reply_markup=app_kb
+            )
         return
 
     # Пользователь уже принял условия — показываем нижнее меню.
@@ -1811,11 +1848,15 @@ async def cmd_start(message: Message):
             "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
             "⚡ Высокая скорость соединения\n"
             "🔐 Защищённое шифрованное подключение\n"
-            "📶 Безопасность в публичных сетях Wi-Fi\n\n"
-            "Выберите действие в меню ниже 👇",
+            "📶 Безопасность в публичных сетях Wi-Fi",
             parse_mode=ParseMode.HTML,
             reply_markup=user_keyboard()
         )
+        if app_kb:
+            await message.answer(
+                "📱 Управляйте подпиской в приложении — покупка, продление и поддержка в пару касаний:",
+                reply_markup=app_kb
+            )
         return
 
     # Иначе — только карточка с принятием условий. Нижнее меню НЕ показываем.
@@ -1838,6 +1879,12 @@ async def accept_terms_callback(callback: CallbackQuery):
         "👇 Главное меню",
         reply_markup=main_keyboard(is_admin(user_id))
     )
+    app_kb = webapp_inline_keyboard()
+    if app_kb:
+        await callback.message.answer(
+            "📱 Всё управление подпиской — в приложении:",
+            reply_markup=app_kb
+        )
     await callback.answer("Условия приняты ✅")
 
 # ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ (КНОПКИ МЕНЮ) ======================
@@ -4278,7 +4325,7 @@ async def setup_menu_button(bot_instance: Bot):
     try:
         from aiogram.types import MenuButtonWebApp, WebAppInfo
         await bot_instance.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="⚡ Приложение", web_app=WebAppInfo(url=webapp_url))
+            menu_button=MenuButtonWebApp(text="Приложение", web_app=WebAppInfo(url=webapp_url))
         )
         logger.info(f"✅ Кнопка меню настроена на веб-апп: {webapp_url}")
     except Exception as e:

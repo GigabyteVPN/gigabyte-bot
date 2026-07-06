@@ -47,7 +47,7 @@ export default function Instructions() {
   };
 
   return (
-    <div className="px-4 pt-10 flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-500 pb-2">
+    <div className="px-4 pt-2 flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-500 pb-2">
       <header className="mb-2 pt-4 px-1">
         <h1 className="text-[19.8px] uppercase tracking-widest font-bold text-[#8E8E93] mb-2 leading-tight flex items-start gap-3 px-4 mt-2">
           <ShieldCheck className="w-6 h-6 text-blue-500/80 animate-pulse mt-0.5 shrink-0" />

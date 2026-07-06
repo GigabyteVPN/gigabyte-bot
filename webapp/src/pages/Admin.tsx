@@ -10,12 +10,9 @@ import {
   Users,
   Gauge,
   Server,
-  ArrowUpRight,
-  LifeBuoy,
   RefreshCw,
   Send,
   Wallet,
-  Globe,
   Star,
   Loader2,
   Copy,
@@ -28,6 +25,8 @@ import {
   Ticket as TicketIcon,
   Hourglass,
   MessageSquare,
+  Activity,
+  Cpu,
 } from 'lucide-react';
 
 // ============================================================
@@ -58,6 +57,15 @@ const Row = ({ label, value, accent }: { label: string; value: React.ReactNode; 
   <div className="flex justify-between items-center px-5 py-4 border-b border-white/[0.06] last:border-b-0">
     <div className="text-[15px] text-white/85">{label}</div>
     <div className={cn('text-[16px] font-semibold', accent || 'text-white')}>{value}</div>
+  </div>
+);
+
+const IconChip = ({ icon: Icon, tint }: { icon: React.ElementType; tint: string }) => (
+  <div
+    className="w-9 h-9 rounded-xl app-icon flex items-center justify-center shrink-0"
+    style={{ background: `linear-gradient(180deg, ${tint}55, ${tint}22)` }}
+  >
+    <Icon className="w-[18px] h-[18px]" style={{ color: tint }} />
   </div>
 );
 
@@ -109,20 +117,21 @@ function Segmented({
   );
 }
 
-const CopyCode = ({ value }: { value: string }) => {
+const CopyCode = ({ value, className }: { value: string; className?: string }) => {
   const [copied, setCopied] = useState(false);
   return (
     <button
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         navigator.clipboard.writeText(value);
         hapticFeedback.selectionChanged();
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="flex items-center gap-2 font-mono text-[13px] text-white active:opacity-60"
+      className={cn('inline-flex items-center gap-1.5 font-mono active:opacity-60', className || 'text-[13px] text-white')}
     >
       {value}
-      {copied ? <Check className="w-3.5 h-3.5 text-[#32D74B]" /> : <Copy className="w-3.5 h-3.5 text-white/40" />}
+      {copied ? <Check className="w-3.5 h-3.5 text-[#32D74B]" /> : <Copy className="w-3.5 h-3.5 text-white/35" />}
     </button>
   );
 };
@@ -166,7 +175,168 @@ function Sheet({ onClose, children }: { onClose: () => void; children: React.Rea
 }
 
 // ============================================================
-//  ОБЗОР
+//  Графики (SVG, без внешних библиотек)
+// ============================================================
+
+type DayPoint = { date: string; revenue: number; payments: number; new_users: number };
+
+const dayShort = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('ru-RU', { day: 'numeric' });
+};
+
+// Столбчатый график выручки с анимацией роста столбиков
+function RevenueBars({ daily }: { daily: DayPoint[] }) {
+  const W = 340;
+  const H = 130;
+  const pad = 4;
+  const maxV = Math.max(...daily.map((d) => d.revenue), 1);
+  const bw = (W - pad * 2) / daily.length;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 18}`} className="w-full">
+      {daily.map((d, i) => {
+        const h = Math.max((d.revenue / maxV) * H, d.revenue > 0 ? 6 : 2.5);
+        const x = pad + i * bw;
+        return (
+          <g key={d.date}>
+            <motion.rect
+              initial={{ height: 0, y: H }}
+              animate={{ height: h, y: H - h }}
+              transition={{ type: 'spring', damping: 22, stiffness: 200, delay: i * 0.035 }}
+              x={x + bw * 0.18}
+              width={bw * 0.64}
+              rx={bw * 0.3}
+              fill={d.revenue > 0 ? 'url(#revGrad)' : 'rgba(255,255,255,0.08)'}
+            />
+            {i % 2 === 1 && (
+              <text x={x + bw / 2} y={H + 14} textAnchor="middle" fontSize="8.5" fill="rgba(255,255,255,0.35)">
+                {dayShort(d.date)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      <defs>
+        <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4DA6FF" />
+          <stop offset="100%" stopColor="#0A84FF" stopOpacity="0.55" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+// Плавная area-диаграмма новых пользователей
+function UsersArea({ daily }: { daily: DayPoint[] }) {
+  const W = 340;
+  const H = 90;
+  const maxV = Math.max(...daily.map((d) => d.new_users), 1);
+  const step = W / (daily.length - 1);
+  const pts = daily.map((d, i) => [i * step, H - (d.new_users / maxV) * (H - 12) - 4] as const);
+  const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const area = `${line} L${W},${H} L0,${H} Z`;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+      <defs>
+        <linearGradient id="usersGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#32D74B" stopOpacity="0.45" />
+          <stop offset="100%" stopColor="#32D74B" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <motion.path
+        d={area}
+        fill="url(#usersGrad)"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.8 }}
+      />
+      <motion.path
+        d={line}
+        fill="none"
+        stroke="#32D74B"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 1, ease: 'easeOut' }}
+      />
+      {pts.map(([x, y], i) =>
+        daily[i].new_users > 0 ? <circle key={i} cx={x} cy={y} r="2.6" fill="#32D74B" /> : null,
+      )}
+    </svg>
+  );
+}
+
+// Кольцевая диаграмма распределения по способам оплаты
+const METHOD_META: Record<string, { label: string; color: string }> = {
+  crypto: { label: 'Криптовалюта', color: '#BF5AF2' },
+  stars: { label: 'Telegram Stars', color: '#0A84FF' },
+  trial: { label: 'Триал', color: '#FF9F0A' },
+};
+
+function MethodDonut({ methods }: { methods: Record<string, { count: number; sum: number }> }) {
+  const entries = Object.entries(methods).filter(([, v]) => v.count > 0);
+  const total = entries.reduce((acc, [, v]) => acc + v.count, 0) || 1;
+  const R = 40;
+  const C = 2 * Math.PI * R;
+  let offset = 0;
+
+  return (
+    <div className="flex items-center gap-5">
+      <div className="relative shrink-0">
+        <svg viewBox="0 0 100 100" className="w-[110px] h-[110px] -rotate-90">
+          <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="12" />
+          {entries.map(([m, v]) => {
+            const frac = v.count / total;
+            const meta = METHOD_META[m] || { label: m, color: '#8E8E93' };
+            const seg = (
+              <motion.circle
+                key={m}
+                cx="50"
+                cy="50"
+                r={R}
+                fill="none"
+                stroke={meta.color}
+                strokeWidth="12"
+                strokeLinecap="round"
+                strokeDasharray={`${Math.max(frac * C - 3, 2)} ${C}`}
+                initial={{ strokeDashoffset: C }}
+                animate={{ strokeDashoffset: -offset }}
+                transition={{ type: 'spring', damping: 25, stiffness: 120 }}
+              />
+            );
+            offset += frac * C;
+            return seg;
+          })}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center rotate-0">
+          <span className="text-[20px] font-bold text-white leading-none">{total}</span>
+          <span className="text-[9px] text-white/40 uppercase tracking-wider mt-0.5">оплат</span>
+        </div>
+      </div>
+      <div className="flex-1 flex flex-col gap-2.5">
+        {entries.map(([m, v]) => {
+          const meta = METHOD_META[m] || { label: m, color: '#8E8E93' };
+          return (
+            <div key={m} className="flex items-center gap-2.5">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: meta.color, boxShadow: `0 0 8px ${meta.color}88` }} />
+              <div className="flex-1 text-[13px] text-white/80">{meta.label}</div>
+              <div className="text-[13px] font-semibold text-white">
+                {Math.round((v.count / total) * 100)}%
+                <span className="text-white/40 font-normal ml-1.5">₽{Math.round(v.sum).toLocaleString('ru-RU')}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  ОБЗОР — полноценный дашборд
 // ============================================================
 
 function OverviewPage() {
@@ -174,22 +344,29 @@ function OverviewPage() {
 
   if (loading || !stats) {
     return (
-      <div className="px-4 pt-10 flex flex-col gap-5 pb-8">
+      <div className="px-4 pt-2 flex flex-col gap-5 pb-8">
         <PageHeader title="Обзор" />
         <Spinner />
       </div>
     );
   }
 
+  const daily: DayPoint[] = stats.daily || [];
+  const week = daily.slice(-7);
+  const weekUsers = week.reduce((a, d) => a + d.new_users, 0);
+  const weekPayments = week.reduce((a, d) => a + d.payments, 0);
+
   const tiles = [
     { label: 'Пользователи', value: stats.users.total, sub: `+${stats.users.new_today} сегодня`, icon: Users, tint: '#0A84FF' },
     { label: 'Активные подписки', value: stats.subscriptions.active, sub: `${stats.subscriptions.expiring_week} истекают за 7д`, icon: Gauge, tint: '#32D74B' },
-    { label: 'Ожидают оплаты', value: stats.pending_payments, sub: 'платежей в очереди', icon: Hourglass, tint: '#FF9F0A' },
+    { label: 'Ожидают оплаты', value: stats.pending_payments, sub: 'аннулируются через 24ч', icon: Hourglass, tint: '#FF9F0A' },
     { label: 'Открытые тикеты', value: stats.open_tickets, sub: 'ждут ответа', icon: TicketIcon, tint: '#FF453A' },
   ];
 
+  const maxServer = Math.max(...(stats.top_servers as any[]).map((s: any) => s.count), 1);
+
   return (
-    <div className="px-4 pt-10 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
       <div className="flex items-start justify-between">
         <PageHeader
           title="Обзор"
@@ -238,23 +415,52 @@ function OverviewPage() {
         </div>
       </div>
 
+      {/* График выручки за 14 дней */}
+      <Section title="Выручка · 14 дней">
+        <Card className="p-5">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-[13px] text-white/50">
+              {weekPayments} оплат за неделю
+            </div>
+            <div className="text-[13px] font-semibold text-[#4DA6FF]">
+              ₽{week.reduce((a, d) => a + d.revenue, 0).toLocaleString('ru-RU')} / 7д
+            </div>
+          </div>
+          <RevenueBars daily={daily} />
+        </Card>
+      </Section>
+
       {/* Плитки-метрики */}
       <div className="grid grid-cols-2 gap-3">
         {tiles.map((t) => (
           <div key={t.label} className="glass rounded-[28px] p-4">
-            <div
-              className="w-9 h-9 rounded-xl app-icon flex items-center justify-center mb-3"
-              style={{ background: `linear-gradient(180deg, ${t.tint}55, ${t.tint}22)` }}
-            >
-              <t.icon className="w-[18px] h-[18px]" style={{ color: t.tint }} />
-            </div>
-            <div className="text-[26px] font-bold tracking-tight leading-none">{t.value}</div>
+            <IconChip icon={t.icon} tint={t.tint} />
+            <div className="text-[26px] font-bold tracking-tight leading-none mt-3">{t.value}</div>
             <div className="text-[13px] text-white/85 font-medium mt-1.5">{t.label}</div>
             <div className="text-[12px] text-[#8E8E93] mt-0.5">{t.sub}</div>
           </div>
         ))}
       </div>
 
+      {/* Новые пользователи */}
+      <Section title="Новые пользователи · 14 дней">
+        <Card className="p-5">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-[13px] text-white/50">Динамика регистраций</div>
+            <div className="text-[13px] font-semibold text-[#32D74B]">+{weekUsers} за неделю</div>
+          </div>
+          <UsersArea daily={daily} />
+        </Card>
+      </Section>
+
+      {/* Способы оплаты — кольцевая диаграмма */}
+      <Section title="Способы оплаты">
+        <Card className="p-5">
+          <MethodDonut methods={stats.methods} />
+        </Card>
+      </Section>
+
+      {/* Конверсия */}
       <Section title="Конверсия">
         <Card className="p-5 space-y-5">
           {[
@@ -269,14 +475,16 @@ function OverviewPage() {
                 </span>
               </div>
               <div className="h-2.5 w-full bg-white/[0.07] rounded-full overflow-hidden">
-                <div
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(Number(v), 100)}%` }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 120 }}
                   className="h-full rounded-full"
                   style={{
-                    width: `${Math.min(Number(v), 100)}%`,
                     background: `linear-gradient(90deg, ${color}88, ${color})`,
                     boxShadow: `0 0 12px ${color}66`,
                   }}
-                ></div>
+                />
               </div>
             </div>
           ))}
@@ -287,26 +495,30 @@ function OverviewPage() {
         </Card>
       </Section>
 
-      <Section title="Способы оплаты">
-        <Card>
-          {Object.entries(stats.methods as Record<string, { count: number; sum: number }>).map(([m, v]) => (
-            <Row
-              key={m}
-              label={m === 'crypto' ? '₿ Криптовалюта' : m === 'stars' ? '⭐ Telegram Stars' : m === 'trial' ? '🎁 Триал' : m}
-              value={`${v.count} шт · ₽${Math.round(v.sum).toLocaleString('ru-RU')}`}
-            />
-          ))}
-        </Card>
-      </Section>
-
-      <Section title="Топ серверов">
-        <Card>
+      {/* Топ серверов с прогресс-барами */}
+      <Section title="Нагрузка серверов">
+        <Card className="p-5 flex flex-col gap-4">
           {(stats.top_servers as { name: string; count: number }[]).map((s, i) => (
-            <Row key={i} label={`${i + 1}. ${s.name}`} value={`${s.count}`} />
+            <div key={i}>
+              <div className="flex justify-between text-[14px] mb-1.5">
+                <span className="text-white/85 emoji-flag">{s.name}</span>
+                <span className="font-semibold text-white">{s.count}</span>
+              </div>
+              <div className="h-2 w-full bg-white/[0.07] rounded-full overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(s.count / maxServer) * 100}%` }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 120, delay: i * 0.08 }}
+                  className="h-full rounded-full bg-gradient-to-r from-[#5E5CE6] to-[#4DA6FF]"
+                  style={{ boxShadow: '0 0 10px rgba(94,92,230,0.5)' }}
+                />
+              </div>
+            </div>
           ))}
         </Card>
       </Section>
 
+      {/* Последние платежи */}
       <Section title="Последние платежи">
         <Card>
           {stats.recent_payments.length === 0 && (
@@ -326,7 +538,7 @@ function OverviewPage() {
                   {p.method === 'crypto' ? <Wallet className="w-4 h-4" /> : <Star className="w-4 h-4" />}
                 </div>
                 <div>
-                  <div className="text-[14px] text-white font-medium">ID {p.user_id}</div>
+                  <CopyCode value={String(p.user_id)} className="text-[14px] text-white" />
                   <div className="text-[12px] text-[#8E8E93]">
                     {p.created_at
                       ? new Date(p.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -389,13 +601,25 @@ function TariffsTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Тарифы">
+      <Section title="Тарифная сетка">
         {tarLoading || !tariffs ? (
           <Spinner />
         ) : (
           <Card>
             {tariffs.map((t: Tariff) => (
-              <Row key={t.months} label={t.label} value={`${t.rub} ₽ · ⭐${t.stars}`} accent="text-[#32D74B]" />
+              <div key={t.months} className="flex items-center gap-3.5 px-5 py-4 border-b border-white/[0.06] last:border-b-0">
+                <IconChip icon={CreditCard} tint="#32D74B" />
+                <div className="flex-1">
+                  <div className="text-[16px] font-semibold text-white">{t.label}</div>
+                  <div className="text-[12px] text-[#8E8E93]">
+                    ≈ ${t.usd} · {t.months >= 1 ? `${Math.round(t.rub / t.months)} ₽/мес` : ''}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[17px] font-bold text-[#32D74B]">{t.rub} ₽</div>
+                  <div className="text-[12px] text-[#8E8E93]">⭐ {t.stars}</div>
+                </div>
+              </div>
             ))}
           </Card>
         )}
@@ -403,35 +627,37 @@ function TariffsTab() {
 
       <Section title="Управление ценами">
         <Card className="p-4">
+          <div className="text-[13px] text-[#8E8E93] mb-3 px-1">Быстрая наценка на все тарифы:</div>
           <div className="grid grid-cols-4 gap-2 mb-4">
             {[10, 20, 30, 50].map((p) => (
               <button
                 key={p}
                 onClick={() => applyPercent(p)}
                 disabled={busy}
-                className="btn-glass text-[15px] font-semibold py-3 rounded-2xl active:scale-[0.96] transition-transform disabled:opacity-50"
+                className="btn-glass text-[15px] font-semibold py-3 rounded-full active:scale-[0.96] transition-transform disabled:opacity-50"
               >
                 +{p}%
               </button>
             ))}
           </div>
+          <div className="text-[13px] text-[#8E8E93] mb-2 px-1">Или задайте цену за 1 месяц — остальные пересчитаются:</div>
           <div className="flex gap-2">
             <input
               value={manual}
               onChange={(e) => setManual(e.target.value.replace(/[^\d.]/g, ''))}
               placeholder="Цена за 1 месяц, ₽"
               inputMode="numeric"
-              className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60"
+              className="flex-1 h-[48px] bg-black/30 border border-white/10 rounded-full px-5 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60"
             />
             <button
               onClick={applyBase}
               disabled={busy || !manual}
-              className="px-6 btn-primary text-white text-[15px] font-semibold rounded-2xl active:scale-[0.96] transition-transform disabled:opacity-40"
+              className="px-6 h-[48px] btn-primary text-white text-[15px] font-semibold rounded-full active:scale-[0.96] transition-transform disabled:opacity-40"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'ОК'}
             </button>
           </div>
-          <div className="text-[12px] text-[#8E8E93] mt-3 px-1">3 мес = ×2.5 · 6 мес = ×4.5 · 1 год = ×8.5 от цены месяца</div>
+          <div className="text-[12px] text-[#8E8E93] mt-3 px-1">3 мес = ×2.5 · 6 мес = ×4.5 · 1 год = ×8.5</div>
         </Card>
       </Section>
 
@@ -483,18 +709,19 @@ function PromoTab() {
     <div className="flex flex-col gap-6">
       <Section title="Создать ключ">
         <Card className="p-4">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-wrap gap-2">
             {options.map(([m, label]) => (
               <button
                 key={String(m)}
                 onClick={() => create(m, label)}
                 disabled={busy}
-                className="btn-glass active:scale-[0.96] text-[14px] font-semibold py-3.5 rounded-2xl transition-transform disabled:opacity-50"
+                className="btn-glass active:scale-[0.96] text-[14px] font-semibold px-5 py-3 rounded-full transition-transform disabled:opacity-50"
               >
                 {label}
               </button>
             ))}
           </div>
+          <div className="text-[12px] text-[#8E8E93] mt-3 px-1">Ключ сразу копируется в буфер обмена.</div>
         </Card>
       </Section>
 
@@ -562,7 +789,7 @@ function StarsTab() {
 function SalesPage() {
   const [tab, setTab] = useState('tariffs');
   return (
-    <div className="px-4 pt-10 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
       <PageHeader title="Продажи" />
       <Segmented
         id="sales"
@@ -623,25 +850,35 @@ function TicketsTab() {
   const open = (tickets || []).filter((t: Ticket) => t.status === 'open');
   const closed = (tickets || []).filter((t: Ticket) => t.status !== 'open');
 
+  const initial = (t: Ticket) => (t.username || t.full_name || String(t.user_id) || '?').replace('@', '').charAt(0).toUpperCase();
+
   const TicketCard = ({ t }: { t: Ticket }) => (
-    <div className="px-5 py-4 flex flex-col gap-2 border-b border-white/[0.06] last:border-b-0">
-      <div className="flex justify-between items-center">
-        <div className="text-[15px] font-medium text-white">
-          {t.username ? `@${t.username}` : t.full_name || `ID: ${t.user_id}`}
-          <span className="text-white/35 font-mono text-[11px] ml-2">{t.ticket_id}</span>
+    <div className="px-5 py-4 flex flex-col gap-2.5 border-b border-white/[0.06] last:border-b-0">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full app-icon bg-gradient-to-b from-[#5E5CE6]/60 to-[#5E5CE6]/20 flex items-center justify-center text-[15px] font-bold text-white shrink-0">
+          {initial(t)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[15px] font-semibold text-white truncate">
+            {t.username ? `@${t.username}` : t.full_name || `ID: ${t.user_id}`}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-white/35 font-mono text-[11px]">{t.ticket_id}</span>
+            {t.user_id != null && <CopyCode value={String(t.user_id)} className="text-[11px] text-white/45" />}
+          </div>
         </div>
         <div
           className={cn(
-            'px-2.5 py-1 text-[10px] rounded-full uppercase font-bold tracking-wider',
+            'px-2.5 py-1 text-[10px] rounded-full uppercase font-bold tracking-wider shrink-0',
             t.status === 'open' ? 'bg-[#FF453A]/20 text-[#FF6961]' : 'bg-[#32D74B]/15 text-[#32D74B]',
           )}
         >
           {t.status === 'open' ? 'Открыт' : 'Закрыт'}
         </div>
       </div>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5 glass-inner rounded-2xl px-3.5 py-2.5">
         {t.messages.slice(-3).map((m, i) => (
-          <div key={i} className="text-[14px] leading-snug">
+          <div key={i} className="text-[13.5px] leading-snug">
             <span className={cn('font-bold', m.is_admin ? 'text-[#4DA6FF]' : 'text-white/40')}>
               {m.is_admin ? 'Вы: ' : 'Юзер: '}
             </span>
@@ -649,7 +886,7 @@ function TicketsTab() {
           </div>
         ))}
       </div>
-      <div className="flex items-center justify-between mt-1">
+      <div className="flex items-center justify-between">
         <div className="text-[12px] text-white/35">{new Date(t.created_at).toLocaleString('ru-RU')}</div>
         {t.status === 'open' && (
           <div className="flex gap-2">
@@ -699,13 +936,13 @@ function TicketsTab() {
             onChange={(e) => setText(e.target.value)}
             rows={3}
             placeholder="Текст ответа…"
-            className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-3 resize-none"
+            className="w-full bg-black/30 border border-white/10 rounded-3xl px-4 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-3 resize-none"
             autoFocus
           />
           <button
             onClick={send}
             disabled={busy || !text.trim()}
-            className="w-full py-3.5 btn-primary rounded-2xl text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+            className="w-full py-3.5 btn-primary rounded-full text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
           >
             {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />} Отправить
           </button>
@@ -751,8 +988,9 @@ function CountryTab() {
             <div key={r.request_id} className="px-5 py-4 flex justify-between items-center border-b border-white/[0.06] last:border-b-0">
               <div>
                 <div className="text-[16px] font-medium text-white emoji-flag">{r.country}</div>
-                <div className="text-[12px] text-white/35 mt-0.5">
-                  От: {r.user_id} · {new Date(r.created_at).toLocaleDateString('ru-RU')}
+                <div className="flex items-center gap-2 mt-0.5">
+                  <CopyCode value={String(r.user_id)} className="text-[12px] text-white/45" />
+                  <span className="text-[12px] text-white/35">{new Date(r.created_at).toLocaleDateString('ru-RU')}</span>
                 </div>
               </div>
               <button
@@ -776,13 +1014,13 @@ function CountryTab() {
             onChange={(e) => setText(e.target.value)}
             rows={3}
             placeholder="Текст ответа пользователю…"
-            className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-3 resize-none"
+            className="w-full bg-black/30 border border-white/10 rounded-3xl px-4 py-3 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-3 resize-none"
             autoFocus
           />
           <button
             onClick={send}
             disabled={busy || !text.trim()}
-            className="w-full py-3.5 btn-primary rounded-2xl text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+            className="w-full py-3.5 btn-primary rounded-full text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
           >
             {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />} Отправить и закрыть
           </button>
@@ -795,7 +1033,7 @@ function CountryTab() {
 function SupportPage() {
   const [tab, setTab] = useState('tickets');
   return (
-    <div className="px-4 pt-10 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
       <PageHeader title="Поддержка" />
       <Segmented
         id="support"
@@ -865,7 +1103,8 @@ function UsersTab() {
                   {u.username ? `@${u.username}` : u.full_name || u.user_id}
                   {u.is_admin && <span className="text-[10px] text-[#FF9F0A] font-bold ml-2 bg-[#FF9F0A]/15 px-2 py-0.5 rounded-full">ADMIN</span>}
                 </div>
-                <div className="text-[12px] text-white/35 font-mono">{u.user_id}</div>
+                {/* ID копируется одним касанием */}
+                <CopyCode value={String(u.user_id)} className="text-[12px] text-white/45" />
                 <div className="text-[13px] text-white/55 mt-0.5">
                   Подписок: {u.active_subs} · Оплачено: ₽{Math.round(u.total_paid)}
                 </div>
@@ -894,13 +1133,13 @@ function UsersTab() {
               <button
                 onClick={remove}
                 disabled={busy}
-                className="w-full py-3.5 btn-danger rounded-2xl text-white font-bold text-[16px] disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                className="w-full py-3.5 btn-danger rounded-full text-white font-bold text-[16px] disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
               >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />} Удалить навсегда
               </button>
               <button
                 onClick={() => setConfirm(null)}
-                className="w-full py-3.5 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
+                className="w-full py-3.5 btn-glass rounded-full text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
               >
                 Отмена
               </button>
@@ -954,7 +1193,7 @@ function GiveSubTab() {
             onChange={(e) => setUserId(e.target.value.replace(/\D/g, ''))}
             placeholder="Например: 7017630225"
             inputMode="numeric"
-            className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3.5 text-[16px] font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60"
+            className="w-full h-[50px] bg-black/30 border border-white/10 rounded-full px-5 text-[16px] font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60"
           />
         </Card>
       </Section>
@@ -966,7 +1205,7 @@ function GiveSubTab() {
               key={s.id}
               onClick={() => setServerId(s.id)}
               className={cn(
-                'p-3.5 rounded-2xl text-[14px] font-semibold text-left transition-all active:scale-[0.97]',
+                'p-3.5 rounded-full text-[14px] font-semibold text-center transition-all active:scale-[0.97]',
                 serverId === s.id ? 'btn-primary text-white' : 'btn-glass text-white',
               )}
             >
@@ -983,7 +1222,7 @@ function GiveSubTab() {
               key={m}
               onClick={() => setMonths(m)}
               className={cn(
-                'py-3 rounded-2xl text-[14px] font-semibold transition-all active:scale-[0.95]',
+                'py-3 rounded-full text-[14px] font-semibold transition-all active:scale-[0.95]',
                 months === m ? 'btn-primary text-white' : 'btn-glass text-white',
               )}
             >
@@ -996,7 +1235,7 @@ function GiveSubTab() {
       <button
         onClick={create}
         disabled={busy || !userId || !serverId || months === null}
-        className="w-full py-4 btn-primary rounded-[24px] text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        className="w-full py-4 btn-primary rounded-full text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
       >
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
         Создать подписку
@@ -1032,12 +1271,12 @@ function BroadcastTab() {
           onChange={(e) => setText(e.target.value)}
           rows={6}
           placeholder="Текст рассылки (поддерживается HTML-разметка Telegram)…"
-          className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3.5 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-4 resize-none"
+          className="w-full bg-black/30 border border-white/10 rounded-3xl px-4 py-3.5 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60 mb-4 resize-none"
         />
         <button
           onClick={send}
           disabled={busy || !text.trim()}
-          className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+          className="w-full py-4 btn-primary rounded-full text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
         >
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           Запустить рассылку
@@ -1053,7 +1292,7 @@ function BroadcastTab() {
 function ClientsPage() {
   const [tab, setTab] = useState('users');
   return (
-    <div className="px-4 pt-10 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-5 animate-in fade-in duration-300 pb-8">
       <PageHeader title="Клиенты" />
       <Segmented
         id="clients"
@@ -1113,16 +1352,53 @@ function ServersPage() {
     }
   };
 
+  const list = servers || [];
+  const online = list.filter((s: any) => s.is_active).length;
+
   return (
-    <div className="px-4 pt-10 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
+    <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
       <PageHeader title="Серверы" />
+
+      {/* Статус-карточка сети */}
+      <div
+        className="rounded-[32px] p-6 relative overflow-hidden"
+        style={{
+          background: 'linear-gradient(150deg, rgba(50,215,75,0.22), rgba(255,255,255,0.05))',
+          backdropFilter: 'blur(28px) saturate(1.6)',
+          WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
+          border: '1px solid rgba(255,255,255,0.14)',
+          boxShadow: '0 12px 48px rgba(50,215,75,0.16), inset 0 1px 0 rgba(255,255,255,0.18)',
+        }}
+      >
+        <div className="flex items-center gap-2 text-[13px] uppercase tracking-wider font-semibold text-white/60 mb-2">
+          <Activity className="w-4 h-4" /> Состояние сети
+        </div>
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="text-[44px] font-bold tracking-tight leading-none">
+              {loading ? '…' : `${online}/${list.length}`}
+            </div>
+            <div className="text-[13px] text-white/60 mt-2">нод в строю</div>
+          </div>
+          <div className="flex -space-x-2">
+            {list.slice(0, 5).map((s: any) => (
+              <div
+                key={s.id}
+                className="w-10 h-10 rounded-full app-icon bg-[#1a1a20] flex items-center justify-center text-[16px] emoji-flag border-2 border-[#0c1f12]"
+              >
+                {s.flag || '🌐'}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <Section title="Операции">
         <Card className="p-4 flex flex-col gap-3">
           <button
             onClick={doSync}
             disabled={syncing || importing}
-            className="w-full btn-primary text-white text-[16px] font-semibold py-4 rounded-2xl transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
+            className="w-full btn-primary text-white text-[16px] font-semibold py-4 rounded-full transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
             {syncing ? 'Синхронизация… (до минуты)' : 'Синхронизировать серверы'}
@@ -1130,11 +1406,15 @@ function ServersPage() {
           <button
             onClick={doImport}
             disabled={syncing || importing}
-            className="w-full btn-glass text-white text-[16px] font-semibold py-4 rounded-2xl transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
+            className="w-full btn-glass text-white text-[16px] font-semibold py-4 rounded-full transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
             {importing ? 'Импорт…' : 'Импорт клиентов из панели'}
           </button>
+          <div className="text-[12px] text-[#8E8E93] px-1">
+            Синхронизация сверяет клиентов панелей 3x-ui с базой: импортирует новых, обновляет сроки и восстанавливает
+            пропавших.
+          </div>
         </Card>
       </Section>
 
@@ -1143,21 +1423,34 @@ function ServersPage() {
           <Spinner />
         ) : (
           <Card>
-            {(servers || []).map((s: any) => (
-              <div key={s.id} className="px-5 py-4 flex justify-between items-center border-b border-white/[0.06] last:border-b-0">
-                <div>
-                  <div className="text-[16px] font-medium flex items-center gap-2">
-                    <span className="emoji-flag">{s.flag}</span> {s.name}
-                    <div
+            {list.map((s: any) => (
+              <div key={s.id} className="px-5 py-4 flex items-center gap-3.5 border-b border-white/[0.06] last:border-b-0">
+                <div className="w-11 h-11 rounded-2xl app-icon bg-gradient-to-b from-white/[0.14] to-white/[0.04] flex items-center justify-center text-[20px] emoji-flag shrink-0">
+                  {s.flag || <Cpu className="w-5 h-5 text-white/60" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[16px] font-semibold text-white flex items-center gap-2">
+                    {s.name}
+                    <span
                       className={cn(
-                        'w-2 h-2 rounded-full',
-                        s.is_active ? 'bg-[#32D74B] shadow-[0_0_8px_rgba(50,215,75,0.8)]' : 'bg-[#FF453A]',
+                        'w-2 h-2 rounded-full shrink-0',
+                        s.is_active ? 'bg-[#32D74B] shadow-[0_0_8px_rgba(50,215,75,0.9)]' : 'bg-[#FF453A]',
                       )}
                     />
                   </div>
-                  <div className="text-[12px] text-white/35 mt-0.5 font-mono">{s.ip || '—'}</div>
+                  {s.ip && <CopyCode value={s.ip} className="text-[12px] text-white/45" />}
                 </div>
-                <div className="text-[13px] text-white/45">inbound: {s.inbound_id}</div>
+                <div className="text-right shrink-0">
+                  <div
+                    className={cn(
+                      'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full',
+                      s.is_active ? 'bg-[#32D74B]/15 text-[#32D74B]' : 'bg-[#FF453A]/15 text-[#FF6961]',
+                    )}
+                  >
+                    {s.is_active ? 'Online' : 'Off'}
+                  </div>
+                  <div className="text-[11px] text-white/35 mt-1">inbound {s.inbound_id}</div>
+                </div>
               </div>
             ))}
           </Card>

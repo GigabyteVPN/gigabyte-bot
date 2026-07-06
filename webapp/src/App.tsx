@@ -160,8 +160,9 @@ export default function App() {
           style={{
             // В полноэкранном режиме (Bot API 8.0) поверх контента появляются
             // системная шторка и кнопки Telegram — учитываем оба safe-area.
+            // Минимальный запас маленький, чтобы контент начинался выше.
             paddingTop:
-              'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 8px), 56px)',
+              'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px)), 12px)',
             paddingBottom: 'max(var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom)), 128px)',
             paddingLeft: 'var(--tg-safe-area-inset-left, env(safe-area-inset-left))',
             paddingRight: 'var(--tg-safe-area-inset-right, env(safe-area-inset-right))',

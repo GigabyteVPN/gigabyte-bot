@@ -903,7 +903,25 @@ async def api_admin_stats(request: web.Request) -> web.Response:
 
     recent = sorted(completed, key=lambda p: p.get("created_at") or "", reverse=True)[:8]
 
+    # Дневные ряды за последние 14 дней — для графиков дашборда
+    day_map: Dict[str, Dict[str, Any]] = {}
+    for i in range(13, -1, -1):
+        d = (now - timedelta(days=i)).date().isoformat()
+        day_map[d] = {"date": d, "revenue": 0.0, "payments": 0, "new_users": 0}
+    for p in completed:
+        key = (p.get("created_at") or "")[:10]
+        if key in day_map:
+            day_map[key]["revenue"] += (p["amount_rub"] or 0)
+            day_map[key]["payments"] += 1
+    users_rows = await B.fetch_all_supabase_rows("users", "user_id, created_at")
+    for u in users_rows:
+        key = (u.get("created_at") or "")[:10]
+        if key in day_map:
+            day_map[key]["new_users"] += 1
+    daily = list(day_map.values())
+
     return ok({
+        "daily": daily,
         "users": {"total": users_cnt.count, "new_today": new_today.count,
                   "new_week": new_week.count, "new_month": new_month.count},
         "subscriptions": {"active": len(active_subs), "expiring_week": expiring, "trials": trial_cnt.count},
