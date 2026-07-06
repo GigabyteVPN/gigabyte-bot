@@ -129,6 +129,17 @@ def months_label(months: float) -> str:
     return f"{months:g} мес"
 
 
+def ics_token(sub_id: str) -> str:
+    """HMAC-подпись для публичной ссылки на ICS-напоминание.
+
+    Ссылку скачивает системный загрузчик устройства (без заголовка
+    Authorization), поэтому доступ защищается подписью от токена бота:
+    подобрать её, не зная BOT_TOKEN, нельзя."""
+    return hmac.new(
+        B.BOT_TOKEN.encode(), f"ics:{sub_id}".encode(), hashlib.sha256
+    ).hexdigest()[:32]
+
+
 async def build_invoice_link(data: dict, is_extend: bool) -> str:
     stars = int(data.get("stars", 0))
     label = months_label(data.get("months", 0))
@@ -172,6 +183,18 @@ async def cors_middleware(request: web.Request, handler):
 async def auth_middleware(request: web.Request, handler):
     if not request.path.startswith("/api/"):
         return await handler(request)
+
+    # Публичные эндпоинты (ICS-файлы напоминаний) защищены собственным
+    # HMAC-токеном в query-параметрах — initData для них не нужен,
+    # т.к. файл скачивает системный загрузчик без наших заголовков.
+    if request.path.startswith("/api/public/"):
+        try:
+            return await handler(request)
+        except web.HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"API public error {request.path}: {e}")
+            return err("Внутренняя ошибка сервера", 500)
 
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("tma "):
@@ -255,8 +278,80 @@ async def api_subscriptions(request: web.Request) -> web.Response:
             "expiry_date": expiry,
             "status": "active" if is_active else "expired",
             "sub_link": B.generate_subscription_link(server, s["sub_id"]) if server else None,
+            "ics_url": (
+                f"/api/public/reminder.ics?sub_id={s['sub_id']}&t={ics_token(s['sub_id'])}"
+                if is_active and expiry > 0 else None
+            ),
         })
     return ok(subs)
+
+
+async def api_public_reminder_ics(request: web.Request) -> web.Response:
+    """Файл календаря (.ics) с напоминаниями об истечении подписки.
+
+    Открывается системным календарём iPhone/Android/десктопа и создаёт
+    событие с двумя будильниками: за 24 часа и за 1 час до отключения."""
+    sub_id = request.query.get("sub_id", "")
+    token = request.query.get("t", "")
+    if not sub_id or len(sub_id) > 64 or not hmac.compare_digest(token, ics_token(sub_id)):
+        return err("Неверная ссылка", 403)
+
+    await B.init_supabase()
+    res = await B.supabase.table("subscriptions").select("expiry_date, status, server_id").eq(
+        "sub_id", sub_id).execute()
+    if not res.data:
+        return err("Подписка не найдена", 404)
+    sub = res.data[0]
+    expiry = sub.get("expiry_date") or 0
+    if sub.get("status") != "active" or expiry <= 0:
+        return err("Подписка не активна", 404)
+
+    servers = await B.load_servers_from_supabase()
+    server = next((s for s in servers if s["id"] == sub.get("server_id")), None)
+    server_name = (server or {}).get("name", "Gigabyte")
+
+    from datetime import timezone
+    dt_start = datetime.fromtimestamp(expiry / 1000, tz=timezone.utc)
+    dt_end = dt_start + timedelta(minutes=30)
+    stamp = datetime.now(tz=timezone.utc)
+    fmt = "%Y%m%dT%H%M%SZ"
+
+    def esc_ics(text: str) -> str:
+        return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+
+    ics = "\r\n".join([
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Gigabyte//Subscription Reminder//RU",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "BEGIN:VEVENT",
+        f"UID:gigabyte-{sub_id}@gigabyte",
+        f"DTSTAMP:{stamp.strftime(fmt)}",
+        f"DTSTART:{dt_start.strftime(fmt)}",
+        f"DTEND:{dt_end.strftime(fmt)}",
+        f"SUMMARY:{esc_ics(f'⚡ Истекает подписка Gigabyte ({server_name})')}",
+        f"DESCRIPTION:{esc_ics('Подписка отключится в это время. Продлите её заранее в приложении Gigabyte в Telegram.')}",
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{esc_ics('Подписка Gigabyte истекает через 24 часа — продлите её в приложении')}",
+        "TRIGGER:-P1D",
+        "END:VALARM",
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{esc_ics('Подписка Gigabyte истекает через 1 час!')}",
+        "TRIGGER:-PT1H",
+        "END:VALARM",
+        "END:VEVENT",
+        "END:VCALENDAR",
+        "",
+    ])
+    return web.Response(
+        text=ics,
+        content_type="text/calendar",
+        charset="utf-8",
+        headers={"Content-Disposition": 'attachment; filename="gigabyte-reminder.ics"'},
+    )
 
 
 async def api_payments(request: web.Request) -> web.Response:
@@ -1056,8 +1151,21 @@ async def api_admin_import(request: web.Request) -> web.Response:
 
 
 async def api_admin_servers(request: web.Request) -> web.Response:
-    res = await B.supabase.table("servers").select("id, name, flag, ip, is_active, inbound_id").execute()
-    return ok(res.data or [])
+    # ИСПРАВЛЕНИЕ: select конкретных колонок падал с 500, если в таблице
+    # нет какой-то из них (например, flag или ip). Берём все строки и
+    # отдаём только безопасное подмножество полей.
+    res = await B.supabase.table("servers").select("*").execute()
+    out = []
+    for s in res.data or []:
+        out.append({
+            "id": s.get("id"),
+            "name": s.get("name"),
+            "flag": s.get("flag"),
+            "ip": s.get("ip") or s.get("server_ip"),
+            "is_active": s.get("is_active", True),
+            "inbound_id": s.get("inbound_id"),
+        })
+    return ok(out)
 
 
 async def api_admin_users(request: web.Request) -> web.Response:
@@ -1155,6 +1263,7 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/tickets/{ticket_id}/close", api_ticket_close)
     r.add_post("/api/country-requests", api_country_request)
     r.add_delete("/api/account", api_delete_account)
+    r.add_get("/api/public/reminder.ics", api_public_reminder_ics)
     # Админские
     r.add_get("/api/admin/stats", api_admin_stats)
     r.add_get("/api/admin/rates", api_admin_rates)

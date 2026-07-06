@@ -104,8 +104,8 @@ function TicketThread({
               className={cn(
                 'max-w-[85%] rounded-2xl px-4 py-3',
                 m.is_admin
-                  ? 'bg-[#2C2C2E] self-start rounded-bl-md'
-                  : 'bg-[#0A84FF] self-end rounded-br-md',
+                  ? 'glass-inner self-start rounded-bl-md'
+                  : 'btn-primary self-end rounded-br-md',
               )}
             >
               <div className="text-[11px] font-bold uppercase tracking-wider opacity-60 mb-1">

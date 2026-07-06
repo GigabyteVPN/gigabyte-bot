@@ -1092,6 +1092,123 @@ async def sync_all_servers_periodically():
             logger.error(f"Ошибка в периодической синхронизации: {e}")
         await asyncio.sleep(3600)
 
+# ====================== НАПОМИНАНИЯ О ПРОДЛЕНИИ ======================
+# Пользователю отправляются два напоминания: за 24 часа и за 1 час до
+# истечения подписки. Отметка «напоминание отправлено» хранится в колонке
+# subscriptions.reminder_stage (0 — нет, 1 — отправлено 24ч, 2 — отправлено 1ч).
+# Если колонки в БД нет — используется резервный словарь в памяти процесса
+# (напоминания продолжают работать, но после рестарта могут прийти повторно).
+#
+# SQL для колонки (выполнить один раз в Supabase SQL Editor):
+#   alter table subscriptions add column if not exists reminder_stage integer default 0;
+
+_reminder_stage_fallback: Dict[str, int] = {}
+_reminder_column_missing: bool = False
+
+def _get_reminder_stage(sub: dict) -> int:
+    if not _reminder_column_missing and sub.get("reminder_stage") is not None:
+        return int(sub["reminder_stage"] or 0)
+    return _reminder_stage_fallback.get(sub.get("sub_id") or "", 0)
+
+async def _set_reminder_stage(sub_id: str, stage: int):
+    global _reminder_column_missing
+    _reminder_stage_fallback[sub_id] = stage
+    if _reminder_column_missing:
+        return
+    try:
+        await supabase.table("subscriptions").update({"reminder_stage": stage}).eq("sub_id", sub_id).execute()
+    except Exception as e:
+        _reminder_column_missing = True
+        logger.warning(
+            f"⚠️ Колонка subscriptions.reminder_stage недоступна ({e}). "
+            f"Напоминания работают через память процесса. Добавьте колонку: "
+            f"alter table subscriptions add column if not exists reminder_stage integer default 0;"
+        )
+
+def _expiry_reminder_keyboard(sub_id: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="🔄 Продлить сейчас", callback_data=f"extend_{sub_id}")]]
+    webapp_url = os.getenv("WEBAPP_URL")
+    if webapp_url:
+        from aiogram.types import WebAppInfo
+        rows.append([InlineKeyboardButton(text="⚡ Открыть приложение", web_app=WebAppInfo(url=webapp_url))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+async def check_expiry_reminders(bot_instance: Bot):
+    await init_supabase()
+    now_ms = int(time.time() * 1000)
+    day_ms = 24 * 3600 * 1000
+    hour_ms = 3600 * 1000
+
+    subs = await fetch_all_supabase_rows("subscriptions", "*")
+    servers = await load_servers_from_supabase()
+    server_map = {s["id"]: s for s in servers}
+
+    for sub in subs:
+        if sub.get("status") != "active" or not sub.get("user_id"):
+            continue
+        sub_id = sub.get("sub_id")
+        expiry = sub.get("expiry_date") or 0
+        if not sub_id or expiry <= 0:
+            continue
+        left = expiry - now_ms
+        stage = _get_reminder_stage(sub)
+
+        if left <= 0:
+            continue
+        if left > day_ms:
+            # Подписку продлили — сбрасываем отметки, чтобы напомнить в следующем цикле.
+            if stage:
+                await _set_reminder_stage(sub_id, 0)
+            continue
+
+        if left <= hour_ms and stage < 2:
+            target_stage = 2
+        elif stage < 1:
+            target_stage = 1
+        else:
+            continue
+
+        server = server_map.get(sub.get("server_id"), {})
+        server_name = esc(server.get("name", "Gigabyte"))
+        expiry_str = datetime.fromtimestamp(expiry / 1000).strftime("%d.%m.%Y %H:%M")
+        if target_stage == 2:
+            minutes_left = max(1, int(left / 60000))
+            text = (
+                f"🚨 <b>Подписка отключится меньше чем через час!</b>\n\n"
+                f"🌍 Сервер: <b>{server_name}</b>\n"
+                f"⏰ Отключение: <b>{expiry_str}</b> (через ~{minutes_left} мин)\n\n"
+                f"Продлите сейчас, чтобы соединение не прервалось."
+            )
+        else:
+            hours_left = max(1, round(left / hour_ms))
+            text = (
+                f"⏳ <b>Подписка истекает через ~{hours_left} ч.</b>\n\n"
+                f"🌍 Сервер: <b>{server_name}</b>\n"
+                f"⏰ Отключение: <b>{expiry_str}</b>\n\n"
+                f"Продлите заранее — и защита не прервётся ни на секунду."
+            )
+        try:
+            await bot_instance.send_message(
+                sub["user_id"], text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=_expiry_reminder_keyboard(sub_id)
+            )
+            logger.info(f"🔔 Напоминание (этап {target_stage}) отправлено {sub['user_id']} по подписке {sub_id}")
+        except Exception as e:
+            # Пользователь мог заблокировать бота — не ретраим бесконечно.
+            logger.warning(f"Не удалось отправить напоминание {sub.get('user_id')}: {e}")
+        await _set_reminder_stage(sub_id, target_stage)
+
+async def subscription_reminders_task(bot_instance: Bot):
+    """Фоновая проверка истекающих подписок каждые 10 минут."""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            await check_expiry_reminders(bot_instance)
+        except Exception as e:
+            logger.error(f"Ошибка в задаче напоминаний: {e}")
+        await asyncio.sleep(600)
+
 # ====================== БЭКАП В SUPABASE STORAGE ======================
 async def backup_database_to_supabase():
     await init_supabase()
@@ -4233,6 +4350,7 @@ async def main():
     asyncio.create_task(sync_all_servers_periodically())
     asyncio.create_task(daily_backup_task(bot))
     asyncio.create_task(cleanup_rate_limits_periodically())
+    asyncio.create_task(subscription_reminders_task(bot))
 
     # HTTP-сервер поднимаем ВСЕГДА: на нём живут API мини-аппа (/api/*),
     # статика веб-аппа (/app/) и — при заданном WEBHOOK_HOST — вебхук бота.

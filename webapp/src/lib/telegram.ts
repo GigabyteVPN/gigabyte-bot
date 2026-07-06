@@ -32,7 +32,46 @@ export const initTelegramApp = () => {
   } catch (e) {
     // Ignore initialization errors
   }
+
+  const t = tg as any;
+
+  // Полноэкранный режим (Bot API 8.0+): приложение всегда открывается
+  // на весь экран, откуда бы его ни запустили — из чата или из меню.
+  try {
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast('8.0') && t.requestFullscreen && !t.isFullscreen) {
+      t.requestFullscreen();
+    }
+  } catch (e) {}
+
+  // Запрещаем закрытие свайпом вниз — только кнопкой «Закрыть».
+  try {
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast('7.7') && t.disableVerticalSwipes) {
+      t.disableVerticalSwipes();
+    }
+  } catch (e) {}
+
+  // Подтверждение при закрытии, чтобы случайный жест не выкинул из приложения.
+  try {
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.2') && t.enableClosingConfirmation) {
+      t.enableClosingConfirmation();
+    }
+  } catch (e) {}
+
   document.documentElement.className = tg.colorScheme || 'dark';
+};
+
+/** Скачивание файла средствами Telegram (Bot API 8.0+).
+ *  Возвращает false, если метод недоступен — тогда вызывающий код
+ *  открывает ссылку обычным способом. */
+export const downloadFile = (url: string, fileName: string): boolean => {
+  const t = tg as any;
+  try {
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast('8.0') && t.downloadFile) {
+      t.downloadFile({ url, file_name: fileName }, () => {});
+      return true;
+    }
+  } catch (e) {}
+  return false;
 };
 
 export const getUser = () => {

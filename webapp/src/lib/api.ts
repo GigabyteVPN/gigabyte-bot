@@ -65,7 +65,10 @@ export type Subscription = {
   expiry_date: number; // ms timestamp, 0 = бессрочно
   status: 'active' | 'expired';
   sub_link: string | null;
+  ics_url?: string | null; // ссылка на .ics-напоминание для календаря устройства
 };
+
+export const apiBase = API_BASE;
 
 export type Payment = {
   id: number;

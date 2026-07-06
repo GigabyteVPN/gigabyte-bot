@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, Subscription, Payment, HashResult } from '../lib/api';
+import { api, apiBase, Subscription, Payment, HashResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
-import { tg, hapticFeedback, openInvoice } from '../lib/telegram';
+import { tg, hapticFeedback, openInvoice, downloadFile } from '../lib/telegram';
 import {
   Copy,
   RefreshCw,
@@ -17,6 +17,7 @@ import {
   History,
   Zap,
   QrCode,
+  BellPlus,
   Star,
   Trash2,
   Send,
@@ -65,95 +66,136 @@ const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
 
 const isFree = (p: Payment) => !p.amount_rub || Number(p.amount_rub) === 0 || p.method === 'trial';
 
+// Зубчатый край чека (как у отрывной бумажной ленты)
+const ReceiptEdge = ({ flip = false }: { flip?: boolean }) => (
+  <div
+    className="w-full h-[12px] shrink-0"
+    style={{
+      background: flip
+        ? 'linear-gradient(-135deg, #faf9f0 6px, transparent 0) 0 0, linear-gradient(135deg, #faf9f0 6px, transparent 0) 0 0'
+        : 'linear-gradient(-45deg, transparent 6px, #faf9f0 0) 0 0, linear-gradient(45deg, transparent 6px, #faf9f0 0) 0 0',
+      backgroundSize: '12px 12px',
+      backgroundRepeat: 'repeat-x',
+    }}
+  />
+);
+
+const ReceiptRow = ({ k, v }: { k: string; v: React.ReactNode }) => (
+  <div className="flex justify-between gap-3 border-b border-dashed border-black/10 pb-1.5">
+    <span className="opacity-45 font-bold uppercase shrink-0">{k}</span>
+    <span className="font-bold text-right break-all">{v}</span>
+  </div>
+);
+
 const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => void }) => {
+  const uid = String(payment.payment_uid || payment.id);
+  const methodLabel = isFree(payment)
+    ? 'БЕСПЛАТНЫЙ ДОСТУП'
+    : payment.method === 'stars'
+      ? 'TELEGRAM STARS'
+      : `${payment.currency || 'CRYPTO'} · ARBITRUM`;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[200] overflow-y-auto bg-black/70 backdrop-blur-md hidden-scrollbar"
+      className="fixed inset-0 z-[200] overflow-y-auto bg-black/70 backdrop-blur-xl hidden-scrollbar"
       onClick={onClose}
     >
-      <div className="min-h-full w-full flex items-center justify-center px-3 sm:px-4 py-12">
+      <div className="min-h-full w-full flex items-center justify-center px-4 py-12">
         <motion.div
-          initial={{ scale: 0.85, y: 20 }}
-          animate={{ scale: 0.9, y: 0 }}
-          exit={{ scale: 0.85, y: 20 }}
-          className="w-full max-w-md z-10 flex flex-col gap-6 mt-[60px]"
+          initial={{ scale: 0.8, y: 60, rotate: -2, opacity: 0 }}
+          animate={{ scale: 0.92, y: 0, rotate: 0, opacity: 1 }}
+          exit={{ scale: 0.8, y: 60, opacity: 0 }}
+          transition={{ type: 'spring', damping: 22, stiffness: 220 }}
+          className="w-full max-w-md z-10 flex flex-col mt-[48px]"
           onClick={(e) => e.stopPropagation()}
+          style={{ filter: 'drop-shadow(0 24px 48px rgba(0,0,0,0.55))' }}
         >
+          <ReceiptEdge />
           <div
-            className="bg-[#faf9f0] text-[#1a1a1a] p-7 pt-8 rounded-sm shadow-2xl relative flex flex-col font-mono"
+            className="bg-[#faf9f0] text-[#1a1a1a] px-7 pb-7 pt-6 relative flex flex-col font-mono"
             style={{
               backgroundImage: 'radial-gradient(#d1cfc1 0.3px, transparent 0.3px)',
               backgroundSize: '16px 16px',
-              border: '1px solid rgba(0,0,0,0.05)',
             }}
           >
-            <header className="mb-6 text-center border-b-[3px] border-double border-[#1a1a1a]/20 pb-4">
-              <h2 className="text-[28px] font-black tracking-tighter mb-1">GIGABYTE</h2>
-              <div className="text-[9px] font-bold uppercase tracking-[0.2em] opacity-60">
-                ЭЛЕКТРОННЫЙ ЧЕК №{String(payment.payment_uid || payment.id).slice(0, 20).toUpperCase()}
+            {/* Перфорация по бокам */}
+            <div className="absolute left-1.5 top-4 bottom-4 w-[3px] opacity-[0.12]"
+              style={{ backgroundImage: 'radial-gradient(circle, #1a1a1a 1.2px, transparent 1.3px)', backgroundSize: '3px 10px' }} />
+            <div className="absolute right-1.5 top-4 bottom-4 w-[3px] opacity-[0.12]"
+              style={{ backgroundImage: 'radial-gradient(circle, #1a1a1a 1.2px, transparent 1.3px)', backgroundSize: '3px 10px' }} />
+
+            <header className="mb-5 text-center border-b-[3px] border-double border-[#1a1a1a]/20 pb-4">
+              <div className="text-[9px] font-bold uppercase tracking-[0.35em] opacity-40 mb-1.5">
+                ★ ★ ★ ★ ★
+              </div>
+              <h2 className="text-[30px] font-black tracking-tighter mb-1 leading-none">GIGABYTE</h2>
+              <div className="text-[8px] font-bold uppercase tracking-[0.3em] opacity-50">
+                PREMIUM · NETWORK · SERVICES
+              </div>
+              <div className="text-[9px] font-bold uppercase tracking-[0.18em] opacity-60 mt-2.5">
+                КАССОВЫЙ ЧЕК № {uid.slice(0, 22).toUpperCase()}
               </div>
             </header>
 
-            <div className="space-y-3 text-[10px] flex-1">
-              <div className="flex justify-between border-b border-black/5 pb-1.5">
-                <span className="opacity-50 font-bold uppercase">ДАТА И ВРЕМЯ:</span>
-                <span className="font-bold">
-                  {payment.created_at ? new Date(payment.created_at).toLocaleString('ru-RU') : '—'}
-                </span>
+            <div className="space-y-2.5 text-[10px] flex-1">
+              <ReceiptRow
+                k="Дата и время"
+                v={payment.created_at ? new Date(payment.created_at).toLocaleString('ru-RU') : '—'}
+              />
+              <ReceiptRow k="Терминал" v="TELEGRAM MINI APP" />
+              <ReceiptRow k="Кассир" v="GIGABYTE BOT · АВТООПЛАТА" />
+
+              <div className="flex flex-col border-b border-dashed border-black/10 pb-1.5 pt-1">
+                <span className="opacity-45 font-bold mb-0.5 uppercase">Наименование услуги:</span>
+                <div className="flex justify-between gap-2">
+                  <span className="font-bold text-[11px]">
+                    {isFree(payment) ? 'Пробный доступ · 7 дней' : 'Premium Access · Gigabyte Network'}
+                  </span>
+                  <span className="font-bold text-[11px] shrink-0">×1</span>
+                </div>
               </div>
 
-              <div className="flex flex-col border-b border-black/5 pb-1.5">
-                <span className="opacity-50 font-bold mb-0.5 uppercase">НАИМЕНОВАНИЕ УСЛУГИ:</span>
-                <span className="font-bold text-[11px]">Premium Access (Gigabyte Server Network)</span>
-              </div>
-
-              <div className="flex justify-between border-b border-black/5 pb-1.5">
-                <span className="opacity-50 font-bold uppercase">СПОСОБ ОПЛАТЫ:</span>
-                <span className="font-bold uppercase">
-                  {isFree(payment)
-                    ? 'БЕСПЛАТНЫЙ ДОСТУП'
-                    : payment.method === 'stars'
-                      ? 'TELEGRAM STARS'
-                      : payment.currency || 'CRYPTO'}
-                </span>
-              </div>
-
+              <ReceiptRow k="Способ оплаты" v={methodLabel} />
               {payment.tx_hash && (
-                <div className="flex flex-col border-b border-black/5 pb-1.5">
-                  <span className="opacity-50 font-bold mb-0.5 uppercase">ID ТРАНЗАКЦИИ:</span>
-                  <span className="font-bold break-all opacity-80">{payment.tx_hash}</span>
+                <div className="flex flex-col border-b border-dashed border-black/10 pb-1.5">
+                  <span className="opacity-45 font-bold mb-0.5 uppercase">ID транзакции:</span>
+                  <span className="font-bold break-all opacity-75 text-[9px] leading-relaxed">{payment.tx_hash}</span>
                 </div>
               )}
-
-              <div className="flex justify-between pb-1.5">
-                <span className="opacity-50 font-bold uppercase">СТАТУС ИСПОЛНЕНИЯ:</span>
-                <span className="font-bold uppercase text-green-700">УСПЕШНО ЗАВЕРШЕНО</span>
+              <div className="flex justify-between pb-1">
+                <span className="opacity-45 font-bold uppercase">Статус:</span>
+                <span className="font-black uppercase text-green-700 tracking-wider">✓ Успешно завершено</span>
               </div>
 
-              <div className="pt-4 flex flex-col items-center border-t border-[#1a1a1a]/10 mt-2">
-                <span className="text-[9px] font-black uppercase tracking-[0.15em] mb-1">ИТОГО ОПЛАЧЕНО</span>
-                <div className="text-3xl font-black tracking-tighter">
-                  {isFree(payment) ? '₽0.00' : `₽${payment.amount_rub}.00`}
+              <div className="pt-4 pb-1 flex items-end justify-between border-t-2 border-[#1a1a1a]/15 mt-2">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-black uppercase tracking-[0.15em] mb-1 opacity-60">Итого оплачено</span>
+                  <div className="text-[36px] font-black tracking-tighter leading-none">
+                    {isFree(payment) ? '₽0.00' : `₽${payment.amount_rub}.00`}
+                  </div>
+                </div>
+                <div className="bg-white p-1.5 border border-black/10 rounded-[6px]">
+                  <QRCodeSVG value={`GIGABYTE:${uid}`} size={64} level="M" fgColor="#1a1a1a" bgColor="transparent" />
                 </div>
               </div>
 
-              <div className="pt-4 text-center">
+              <div className="pt-3 text-center">
                 <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
-                  Спасибо что выбрали нас!
+                  — Спасибо, что выбрали нас! —
                 </span>
               </div>
             </div>
 
-            <div className="mt-8 flex flex-col items-center">
-              <div className="opacity-60 overflow-hidden mix-blend-multiply w-full flex justify-center mb-6">
+            <div className="mt-6 flex items-end justify-between gap-4">
+              <div className="opacity-60 overflow-hidden mix-blend-multiply flex-1 flex justify-start">
                 <Barcode
-                  value={String(payment.payment_uid || payment.id).slice(0, 12).toUpperCase()}
-                  width={1.2}
-                  height={35}
-                  fontSize={10}
+                  value={uid.slice(0, 12).toUpperCase()}
+                  width={1.15}
+                  height={34}
+                  fontSize={9}
                   margin={0}
                   displayValue={true}
                   background="transparent"
@@ -161,7 +203,13 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
                 />
               </div>
 
-              <div className="relative w-[110px] h-[110px] flex items-center justify-center transform rotate-[-12deg] select-none opacity-85 mix-blend-multiply scale-[0.85]">
+              {/* Печать «шлёпается» на чек с пружинной анимацией */}
+              <motion.div
+                initial={{ scale: 2.4, opacity: 0, rotate: -32 }}
+                animate={{ scale: 0.85, opacity: 0.85, rotate: -12 }}
+                transition={{ type: 'spring', damping: 14, stiffness: 300, delay: 0.4 }}
+                className="relative w-[104px] h-[104px] flex items-center justify-center select-none mix-blend-multiply shrink-0"
+              >
                 <div
                   className="absolute inset-0 border-[3px] border-double border-red-800/60 rounded-full"
                   style={{
@@ -171,7 +219,7 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
                 />
                 <div className="absolute inset-[6px] border-[1.5px] border-dashed border-red-800/50 rounded-full" />
                 <div className="flex flex-col items-center text-red-800/70 z-10 w-full px-2 text-center">
-                  <div className="text-[12px] font-black tracking-[0.25em] uppercase font-serif mb-1 mt-1">GIGABYTE</div>
+                  <div className="text-[11px] font-black tracking-[0.25em] uppercase font-serif mb-1 mt-1">GIGABYTE</div>
                   <div className="w-[80%] h-px bg-red-800/30 my-0.5" />
                   <div className="text-[7.5px] font-bold tracking-[0.15em] uppercase font-serif my-0.5">APPROVED</div>
                   <div className="w-[80%] h-px bg-red-800/30 my-0.5" />
@@ -179,17 +227,18 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
                     {new Date(payment.created_at || new Date()).toLocaleDateString('ru-RU')}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
           </div>
+          <ReceiptEdge flip />
 
-          <div className="flex justify-center mt-6 w-full shrink-0">
+          <div className="flex justify-center mt-7 w-full shrink-0">
             <button
               onClick={onClose}
-              className="w-[68px] h-[68px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center text-white active:scale-95 transition-all shadow-xl"
+              className="w-[64px] h-[64px] glass rounded-full flex items-center justify-center text-white active:scale-90 transition-all"
               aria-label="Закрыть чек"
             >
-              <X className="w-8 h-8" />
+              <X className="w-7 h-7" />
             </button>
           </div>
         </motion.div>
@@ -324,6 +373,26 @@ export default function Dashboard() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Добавляет напоминание об истечении подписки в системный календарь
+  // устройства (iPhone/Android/ПК): скачивается .ics-файл с событием и
+  // двумя будильниками — за 24 часа и за 1 час до отключения.
+  const addDeviceReminder = (sub: Subscription) => {
+    if (!sub.ics_url) return;
+    hapticFeedback.impactOccurred('light');
+    const url = `${apiBase || window.location.origin}${sub.ics_url}`;
+    const started = downloadFile(url, 'gigabyte-reminder.ics');
+    if (!started) {
+      try {
+        tg.openLink(url);
+      } catch {
+        window.open(url, '_blank');
+      }
+    }
+    tg.showAlert(
+      '🔔 Скачивается файл напоминания.\n\nОткройте его — событие добавится в календарь устройства с уведомлениями за 24 часа и за 1 час до отключения подписки.',
+    );
+  };
+
   const payStars = async (p: Payment) => {
     try {
       hapticFeedback.impactOccurred('light');
@@ -437,16 +506,29 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </div>
-                        {isActive && sub.sub_link && (
-                          <button
-                            onClick={() => {
-                              hapticFeedback.impactOccurred('light');
-                              setQrSub(sub);
-                            }}
-                            className="w-10 h-10 bg-white/[0.06] rounded-full flex items-center justify-center border border-white/10 active:scale-90 transition-transform"
-                          >
-                            <QrCode className="w-5 h-5 text-white/70" />
-                          </button>
+                        {isActive && (
+                          <div className="flex gap-2">
+                            {sub.ics_url && (
+                              <button
+                                onClick={() => addDeviceReminder(sub)}
+                                className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                                aria-label="Напоминание на устройство"
+                              >
+                                <BellPlus className="w-5 h-5 text-[#FF9F0A]" />
+                              </button>
+                            )}
+                            {sub.sub_link && (
+                              <button
+                                onClick={() => {
+                                  hapticFeedback.impactOccurred('light');
+                                  setQrSub(sub);
+                                }}
+                                className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                              >
+                                <QrCode className="w-5 h-5 text-white/70" />
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
 
