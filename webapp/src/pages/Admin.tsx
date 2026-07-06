@@ -391,7 +391,7 @@ function OverviewPage() {
           backdropFilter: 'blur(28px) saturate(1.6)',
           WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
           border: '1px solid rgba(255,255,255,0.14)',
-          boxShadow: '0 12px 48px rgba(10,132,255,0.22), inset 0 1px 0 rgba(255,255,255,0.18)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
       >
         <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full bg-[#0A84FF]/25 blur-3xl pointer-events-none" />
@@ -761,7 +761,7 @@ function StarsTab() {
           backdropFilter: 'blur(28px) saturate(1.6)',
           WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
           border: '1px solid rgba(255,255,255,0.14)',
-          boxShadow: '0 12px 48px rgba(255,159,10,0.18), inset 0 1px 0 rgba(255,255,255,0.18)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
       >
         <div className="text-[13px] uppercase tracking-wider font-semibold text-white/60 mb-2">Доступно к выводу</div>
@@ -1367,7 +1367,7 @@ function ServersPage() {
           backdropFilter: 'blur(28px) saturate(1.6)',
           WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
           border: '1px solid rgba(255,255,255,0.14)',
-          boxShadow: '0 12px 48px rgba(50,215,75,0.16), inset 0 1px 0 rgba(255,255,255,0.18)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
       >
         <div className="flex items-center gap-2 text-[13px] uppercase tracking-wider font-semibold text-white/60 mb-2">

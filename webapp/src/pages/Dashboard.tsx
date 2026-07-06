@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import Barcode from 'react-barcode';
 import { QRCodeSVG } from 'qrcode.react';
 
 const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
@@ -191,18 +190,11 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
               </div>
             </div>
 
-            <div className="mt-6 flex items-end justify-between gap-4">
-              <div className="opacity-60 overflow-hidden mix-blend-multiply flex-1 flex justify-start">
-                <Barcode
-                  value={uid.slice(0, 12).toUpperCase()}
-                  width={1.15}
-                  height={34}
-                  fontSize={9}
-                  margin={0}
-                  displayValue={true}
-                  background="transparent"
-                  lineColor="#1a1a1a"
-                />
+            <div className="mt-5 flex items-end justify-between gap-4">
+              <div className="flex-1 text-[8px] font-mono opacity-40 leading-relaxed self-center">
+                {uid.toUpperCase()}
+                <br />
+                SIGNED · GIGABYTE NETWORK
               </div>
 
               {/* Печать «шлёпается» на чек с пружинной анимацией */}
@@ -870,43 +862,39 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ---- Модалка истории ---- */}
+      {/* ---- История транзакций: полноэкранная страница ---- */}
       <AnimatePresence>
         {activeModal === 'history' && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md"
-            onClick={() => {
-              hapticFeedback.selectionChanged();
-              setActiveModal(null);
-            }}
+            initial={{ opacity: 0, x: 60 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 60 }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="fixed inset-0 z-[150] flex flex-col bg-[#050507]"
           >
-            <motion.div
-              initial={{ y: '100%', opacity: 0.5 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: '100%', opacity: 0.5 }}
-              transition={{ type: 'spring', damping: 30, stiffness: 250, mass: 1 }}
-              className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[40px] pb-5 pt-5 px-6 shadow-[0_-8px_60px_rgba(0,0,0,0.7)] flex flex-col h-[78vh] sm:h-[70vh] border-t border-white/10 sm:border relative"
-              onClick={(e) => e.stopPropagation()}
+            <div
+              className="shrink-0 flex items-center gap-3 px-4 pb-3"
+              style={{
+                paddingTop:
+                  'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
+              }}
             >
-              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-10 h-1 bg-white/20 rounded-full sm:hidden z-30 pointer-events-none"></div>
-
-              <div className="flex justify-between items-center mb-3 shrink-0 px-1">
-                <h3 className="text-[22px] font-bold tracking-tight text-white">История транзакций</h3>
-                <button
-                  onClick={() => {
-                    hapticFeedback.selectionChanged();
-                    setActiveModal(null);
-                  }}
-                  className="w-10 h-10 flex items-center justify-center bg-white/5 rounded-full text-white/40 active:scale-90 transition-all hover:bg-white/10 active:text-white"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+              <button
+                onClick={() => {
+                  hapticFeedback.selectionChanged();
+                  setActiveModal(null);
+                }}
+                className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+              >
+                <ChevronLeft className="w-6 h-6 text-white" />
+              </button>
+              <div>
+                <h3 className="text-[24px] font-bold tracking-tight text-white leading-tight">История транзакций</h3>
+                <div className="text-[13px] text-[#8E8E93]">{history.length} завершённых операций</div>
               </div>
+            </div>
 
-              <div className="overflow-y-auto hidden-scrollbar flex-1 -mx-6 px-6 relative">
+            <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-2 relative">
                 {history.length > 0 ? (
                   <div className="flex flex-col gap-5 pb-10">
                     {history.map((p) => (
@@ -1037,8 +1025,7 @@ export default function Dashboard() {
                     </p>
                   </div>
                 )}
-              </div>
-            </motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

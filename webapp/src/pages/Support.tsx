@@ -102,23 +102,20 @@ function SupportChat({
   let lastDay = '';
 
   return (
-    <div className="fixed inset-0 z-[150] flex flex-col bg-[#050507]">
+    <div className="fixed inset-0 z-[150] flex flex-col bg-[#0C0C10]">
       {/* Шапка чата */}
       <div
-        className="shrink-0 flex items-center gap-3 px-3 pb-3 border-b border-white/[0.07]"
+        className="shrink-0 flex items-center gap-3 px-3 pb-3"
         style={{
           paddingTop:
             'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
-          background: 'linear-gradient(180deg, rgba(30,30,36,0.85), rgba(18,18,22,0.75))',
-          backdropFilter: 'blur(30px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(30px) saturate(1.6)',
         }}
       >
         <button
           onClick={onBack}
-          className="w-9 h-9 rounded-full flex items-center justify-center text-[#4DA6FF] active:scale-90 transition-transform"
+          className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
         >
-          <ChevronLeft className="w-7 h-7" />
+          <ChevronLeft className="w-6 h-6 text-white" />
         </button>
         <div className="w-10 h-10 rounded-full app-icon bg-gradient-to-b from-[#4DA6FF]/60 to-[#0A84FF]/30 flex items-center justify-center shrink-0">
           <Headset className="w-5 h-5 text-white" />
@@ -194,12 +191,9 @@ function SupportChat({
       {/* Поле ввода как в Telegram */}
       {isOpen ? (
         <div
-          className="shrink-0 px-3 pt-2.5 flex items-end gap-2 border-t border-white/[0.07]"
+          className="shrink-0 px-3 pt-2.5 flex items-end gap-2"
           style={{
             paddingBottom: 'max(env(safe-area-inset-bottom), 14px)',
-            background: 'linear-gradient(180deg, rgba(24,24,28,0.85), rgba(14,14,18,0.9))',
-            backdropFilter: 'blur(30px) saturate(1.6)',
-            WebkitBackdropFilter: 'blur(30px) saturate(1.6)',
           }}
         >
           <input
@@ -226,7 +220,7 @@ function SupportChat({
         </div>
       ) : (
         <div
-          className="shrink-0 text-center text-[13px] text-[#8E8E93] pt-3 border-t border-white/[0.07]"
+          className="shrink-0 text-center text-[13px] text-[#8E8E93] pt-3"
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }}
         >
           Тикет закрыт. Спасибо за обращение!

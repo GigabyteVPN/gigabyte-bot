@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { hapticFeedback } from '../../lib/telegram';
@@ -16,13 +16,32 @@ interface BottomNavProps {
 
 const spring = { type: 'spring' as const, damping: 26, stiffness: 340, mass: 0.8 };
 
-// Морфинг-таб-бар в стиле iOS: неактивные вкладки — только иконка,
-// активная раскрывается в капсулу «иконка + название». Текст всегда
-// внутри таблетки, ширина анимируется пружиной.
+/** Скрываем панель, когда открыта экранная клавиатура:
+ *  visualViewport сжимается — панель плавно уезжает вниз. */
+function useKeyboardOpen(): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      // Клавиатура почти всегда занимает > 25% высоты окна
+      setOpen(vv.height < window.innerHeight * 0.75);
+    };
+    vv.addEventListener('resize', onResize);
+    onResize();
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+  return open;
+}
+
+// Морфинг-таб-бар в стиле iOS. Контейнер ФИКСИРОВАННОЙ ширины, вкладки
+// делят её пропорционально (активная шире), поэтому панель никогда не
+// меняет размер и не «прыгает» — анимируется только распределение внутри.
 export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const currentPath = location.pathname;
+  const keyboardOpen = useKeyboardOpen();
 
   const handleNavigate = (path: string) => {
     if (currentPath === path) {
@@ -34,9 +53,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
   };
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-[100] pointer-events-none flex justify-center pb-[env(safe-area-inset-bottom)] mb-3">
+    <div
+      className="fixed bottom-0 left-0 right-0 z-[100] pointer-events-none flex justify-center pb-[env(safe-area-inset-bottom)] mb-3 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+      style={{
+        transform: keyboardOpen ? 'translateY(120px)' : 'translateY(0)',
+        opacity: keyboardOpen ? 0 : 1,
+      }}
+    >
       <div
-        className="pointer-events-auto relative flex items-center gap-1 px-1.5"
+        className="pointer-events-auto relative flex items-center px-1.5 w-[min(92vw,400px)]"
         style={{
           height: '58px',
           borderRadius: '29px',
@@ -60,12 +85,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
                 e.preventDefault();
                 handleNavigate(tab.path);
               }}
-              className="relative h-[46px] rounded-full flex items-center justify-center overflow-hidden"
+              className="relative h-[46px] rounded-full flex items-center justify-center overflow-hidden min-w-0"
               style={{
                 WebkitTapHighlightColor: 'transparent',
                 touchAction: 'none',
-                paddingLeft: isActive ? 16 : 13,
-                paddingRight: isActive ? 18 : 13,
+                flex: isActive ? 2.1 : 1,
               }}
             >
               {isActive && (
@@ -85,7 +109,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
                 transition={spring}
                 animate={{ scale: isActive ? 1.08 : 1 }}
                 className={cn(
-                  'relative z-10 flex items-center justify-center',
+                  'relative z-10 flex items-center justify-center shrink-0',
                   isActive ? 'text-[#4DA6FF] drop-shadow-[0_0_10px_rgba(10,132,255,0.65)]' : 'text-white/40',
                 )}
               >
@@ -95,11 +119,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({ tabs }) => {
                 {isActive && (
                   <motion.span
                     key="label"
-                    initial={{ opacity: 0, x: -8, width: 0 }}
-                    animate={{ opacity: 1, x: 0, width: 'auto' }}
-                    exit={{ opacity: 0, x: -6, width: 0 }}
-                    transition={spring}
-                    className="relative z-10 text-[13px] font-bold tracking-tight text-[#8FC5FF] whitespace-nowrap overflow-hidden pl-2"
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -4 }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
+                    className="relative z-10 text-[12.5px] font-bold tracking-tight text-[#8FC5FF] whitespace-nowrap overflow-hidden text-ellipsis min-w-0 pl-1.5"
                   >
                     {tab.label}
                   </motion.span>

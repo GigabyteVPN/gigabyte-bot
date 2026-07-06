@@ -7,7 +7,7 @@ import { cn } from '../lib/utils';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  ArrowLeft,
+  ChevronLeft,
   Check,
   Copy,
   Gift,
@@ -210,8 +210,11 @@ export default function Buy() {
   const Header = ({ title }: { title: string }) => (
     <header className="flex items-center mb-4 pt-2">
       {step !== 'start' && step !== 'success' && (
-        <button onClick={goBack} className="p-2 -ml-2 bg-white/5 rounded-full active:scale-90 transition-transform mr-2">
-          <ArrowLeft className="w-6 h-6" />
+        <button
+          onClick={goBack}
+          className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform mr-3 shrink-0"
+        >
+          <ChevronLeft className="w-6 h-6 text-white" />
         </button>
       )}
       <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
