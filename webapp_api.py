@@ -1191,9 +1191,38 @@ def _admin_server_view(s: dict) -> dict:
     }
 
 
+async def _existing_server_columns() -> Optional[set]:
+    """Набор реальных колонок таблицы servers (по существующей строке).
+    Позволяет не писать несуществующие поля и не ловить ошибку схемы.
+    None — если таблица пуста (тогда фильтрацию не применяем)."""
+    try:
+        res = await B.supabase.table("servers").select("*").limit(1).execute()
+        if res.data:
+            return set(res.data[0].keys())
+    except Exception:
+        pass
+    return None
+
+
+def _filter_server_payload(body: dict, columns: Optional[set], *, for_update: bool) -> dict:
+    out = {}
+    for k in SERVER_EDITABLE_FIELDS:
+        if k not in body:
+            continue
+        if k == "panel_pass" and not body[k]:  # пустой пароль = не менять
+            continue
+        if not for_update and body[k] is None:
+            continue
+        if columns is not None and k not in columns:
+            continue  # такой колонки в таблице нет — пропускаем
+        out[k] = body[k]
+    return out
+
+
 async def api_admin_server_create(request: web.Request) -> web.Response:
     body = await request.json()
-    row = {k: body[k] for k in SERVER_EDITABLE_FIELDS if k in body and body[k] is not None}
+    columns = await _existing_server_columns()
+    row = _filter_server_payload(body, columns, for_update=False)
     if not row.get("name") or not row.get("panel_url"):
         return err("Минимум нужны название и URL панели")
     try:
@@ -1208,13 +1237,8 @@ async def api_admin_server_update(request: web.Request) -> web.Response:
     if not sid.isdigit():
         return err("Неверный ID")
     body = await request.json()
-    # Пустой пароль = «не менять»
-    updates = {}
-    for k in SERVER_EDITABLE_FIELDS:
-        if k in body:
-            if k == "panel_pass" and not body[k]:
-                continue
-            updates[k] = body[k]
+    columns = await _existing_server_columns()
+    updates = _filter_server_payload(body, columns, for_update=True)
     if not updates:
         return err("Нет изменений")
     try:
