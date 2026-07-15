@@ -37,6 +37,25 @@ logger = logging.getLogger(__name__)
 B: Any = None  # модуль bot.py, устанавливается в setup_webapp_api()
 
 INIT_DATA_MAX_AGE = 24 * 3600  # сколько живёт подпись initData
+ONLINE_THRESHOLD_MS = 60_000   # клиент «онлайн», если lastOnline не старше 60 сек
+
+
+def _online_emails_from_inbound(inbound: Optional[dict]) -> set:
+    """Онлайн-клиенты инбаунда по полю lastOnline из clientStats.
+
+    Форк/версия панели не отдаёт эндпоинт /onlines, зато в статистике
+    каждого клиента есть lastOnline (мс). Считаем клиента онлайн, если он
+    был активен за последнюю минуту."""
+    if not inbound:
+        return set()
+    now_ms = int(time.time() * 1000)
+    online = set()
+    for c in inbound.get("clientStats") or []:
+        last = c.get("lastOnline") or 0
+        if last and now_ms - last <= ONLINE_THRESHOLD_MS:
+            if c.get("email"):
+                online.add(c["email"])
+    return online
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -1311,12 +1330,11 @@ async def api_admin_panel_status(request: web.Request) -> web.Response:
         cached = seen_panels.get(key)
         if cached is None:
             xui = B.XUIApi(server)
-            panel: Dict[str, Any] = {"reachable": False, "inbounds": [], "onlines": []}
+            panel: Dict[str, Any] = {"reachable": False, "inbounds": []}
             try:
                 if await xui.login():
                     panel["reachable"] = True
                     panel["inbounds"] = await xui.list_inbounds()
-                    panel["onlines"] = await xui.get_online_emails()
             except Exception as e:
                 logger.warning(f"panel-status {server.get('name')}: {e}")
             finally:
@@ -1326,8 +1344,7 @@ async def api_admin_panel_status(request: web.Request) -> web.Response:
 
         inbound = next((ib for ib in cached["inbounds"] if ib.get("id") == server.get("inbound_id")), None)
         stats = (inbound or {}).get("clientStats") or []
-        inbound_emails = {c.get("email") for c in stats}
-        online_here = [e for e in cached["onlines"] if e in inbound_emails]
+        online_here = list(_online_emails_from_inbound(inbound))
         up = sum((c.get("up") or 0) for c in stats)
         down = sum((c.get("down") or 0) for c in stats)
 
@@ -1376,12 +1393,12 @@ async def api_sub_stats(request: web.Request) -> web.Response:
         inbound = next((ib for ib in inbounds if ib.get("id") == server.get("inbound_id")), None)
         stats = (inbound or {}).get("clientStats") or []
         me = next((c for c in stats if c.get("email") == sub.get("email")), None)
-        onlines = await xui.get_online_emails()
+        online_emails = _online_emails_from_inbound(inbound)
         return ok({
             "available": me is not None,
             "up": (me or {}).get("up") or 0,
             "down": (me or {}).get("down") or 0,
-            "online": sub.get("email") in onlines,
+            "online": sub.get("email") in online_emails,
         })
     finally:
         await xui.close()

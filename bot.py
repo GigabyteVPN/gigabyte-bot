@@ -26,7 +26,7 @@ from supabase import create_async_client, AsyncClient
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
-    Message, ReplyKeyboardMarkup, KeyboardButton, ErrorEvent,
+    Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, ErrorEvent,
     BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton,
     LabeledPrice, PreCheckoutQuery, SuccessfulPayment, CallbackQuery,
     FSInputFile, InputMediaPhoto, BotCommand
@@ -1714,27 +1714,19 @@ async def terms_gate_middleware(handler, event: Message, data: dict):
     return await handler(event, data)
 
 # ====================== КЛАВИАТУРЫ ======================
-def user_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🛒 Купить подписку")],
-        [KeyboardButton(text="🎁 Пробная неделя"), KeyboardButton(text="👤 Личный кабинет")],
-        [KeyboardButton(text="📱 Как подключиться"), KeyboardButton(text="❓ Поддержка")],
-        [KeyboardButton(text="🌍 Запросить новую страну"), KeyboardButton(text="🎫 Активировать ключ")],
-        [KeyboardButton(text="⭐ Купить звёзды"), KeyboardButton(text="🗑 Удалить меня")],
-        [KeyboardButton(text="📄 Публичная оферта"), KeyboardButton(text="🔒 Политика конфиденциальности")]
-    ], resize_keyboard=True, persistent=True)
+# ИЗМЕНЕНИЕ: весь функционал переехал в веб-апп (Telegram Mini App).
+# Нижнее reply-меню бота больше не показывается — вместо него у бота есть
+# кнопка запуска приложения (Menu Button) и инлайн-кнопка «Открыть
+# приложение» под ключевыми сообщениями. Эти функции возвращают
+# ReplyKeyboardRemove, чтобы у всех пользователей исчезло старое меню.
+def user_keyboard() -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
-def admin_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📢 Сделать рассылку"), KeyboardButton(text="🎫 Тикеты поддержки"), KeyboardButton(text="🌍 Запросы на новую страну")],
-        [KeyboardButton(text="🎫 Сгенерировать ключ"), KeyboardButton(text="📋 Список ключей"), KeyboardButton(text="📊 Статистика")],
-        [KeyboardButton(text="✨ Создать подписку (админ)"), KeyboardButton(text="💰 Изменить цены"), KeyboardButton(text="📈 Курс"), KeyboardButton(text="⭐ Баланс звёзд")],
-        [KeyboardButton(text="🔄 Синхронизировать серверы"), KeyboardButton(text="📥 Импорт клиентов из панели")],
-        [KeyboardButton(text="👥 Управление пользователями")]
-    ], resize_keyboard=True, persistent=True)
+def admin_keyboard() -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
-def main_keyboard(is_admin_flag: bool = False) -> ReplyKeyboardMarkup:
-    return admin_keyboard() if is_admin_flag else user_keyboard()
+def main_keyboard(is_admin_flag: bool = False) -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
 def price_percent_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
@@ -1922,39 +1914,40 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
     app_kb = webapp_inline_keyboard()
-
-    # Администратор — сразу админ-меню, без согласия и без юр-кнопок.
-    if is_admin(user_id):
-        await message.answer(
-            "👋 <b>Админ-панель Gigabyte</b>\n\nВыберите действие ниже 👇",
-            parse_mode=ParseMode.HTML,
-            reply_markup=admin_keyboard()
-        )
-        if app_kb:
-            await message.answer(
-                "📱 Вся панель управления — в приложении: статистика, продажи, поддержка и серверы.",
-                reply_markup=app_kb
-            )
+    # Убираем старое нижнее меню, если оно осталось у пользователя от прошлых версий.
+    if app_kb is None:
+        # WEBAPP_URL не задан — просто убираем меню (нештатная ситуация).
+        await message.answer("⚙️ Приложение временно недоступно. Попробуйте позже.",
+                             reply_markup=ReplyKeyboardRemove())
         return
 
-    # Пользователь уже принял условия — показываем нижнее меню.
+    # Администратор — сразу к приложению-панели.
+    if is_admin(user_id):
+        await message.answer(
+            "👋 <b>Админ-панель Gigabyte</b>\n\n"
+            "Вся панель управления теперь в приложении: статистика, продажи, "
+            "поддержка, клиенты и серверы. Откройте его кнопкой ниже 👇",
+            parse_mode=ParseMode.HTML,
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await message.answer("📱 Открыть панель управления:", reply_markup=app_kb)
+        return
+
+    # Пользователь уже принял условия — сразу приглашаем в приложение.
     if await has_accepted_terms(user_id):
         await message.answer(
             "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
             "⚡ Высокая скорость соединения\n"
             "🔐 Защищённое шифрованное подключение\n"
-            "📶 Безопасность в публичных сетях Wi-Fi",
+            "📶 Безопасность в публичных сетях Wi-Fi\n\n"
+            "Всё управление — в приложении: покупка, продление, подключение и поддержка.",
             parse_mode=ParseMode.HTML,
-            reply_markup=user_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
-        if app_kb:
-            await message.answer(
-                "📱 Управляйте подпиской в приложении — покупка, продление и поддержка в пару касаний:",
-                reply_markup=app_kb
-            )
+        await message.answer("📱 Открыть приложение:", reply_markup=app_kb)
         return
 
-    # Иначе — только карточка с принятием условий. Нижнее меню НЕ показываем.
+    # Иначе — карточка с принятием условий (её можно принять и в приложении).
     await send_terms_card(message)
 
 @router.callback_query(F.data == "accept_terms")
@@ -1971,13 +1964,13 @@ async def accept_terms_callback(callback: CallbackQuery):
     except Exception:
         pass
     await callback.message.answer(
-        "👇 Главное меню",
-        reply_markup=main_keyboard(is_admin(user_id))
+        "Готово! Всё управление подпиской — в приложении.",
+        reply_markup=ReplyKeyboardRemove()
     )
     app_kb = webapp_inline_keyboard()
     if app_kb:
         await callback.message.answer(
-            "📱 Всё управление подпиской — в приложении:",
+            "📱 Открыть приложение:",
             reply_markup=app_kb
         )
     await callback.answer("Условия приняты ✅")
@@ -4427,16 +4420,9 @@ async def setup_menu_button(bot_instance: Bot):
         logger.warning(f"⚠️ Не удалось настроить кнопку веб-аппа: {e}")
 
 async def set_commands(bot_instance: Bot):
+    # Весь функционал — в приложении. Оставляем одну команду для входа.
     await bot_instance.set_my_commands([
-        BotCommand(command="start", description="Главное меню"),
-        BotCommand(command="buy", description="Купить подписку"),
-        BotCommand(command="cabinet", description="Личный кабинет"),
-        BotCommand(command="status", description="Статус подписок"),
-        BotCommand(command="extend", description="Продлить подписку"),
-        BotCommand(command="connect", description="Как подключиться"),
-        BotCommand(command="support", description="Поддержка"),
-        BotCommand(command="key", description="Активировать ключ"),
-        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="start", description="Открыть приложение"),
     ])
 
 # ====================== FALLBACK ======================
@@ -4453,9 +4439,11 @@ async def unknown_message(message: Message, state: FSMContext):
         await message.answer("⏳ Ожидание хеша транзакции. Отправьте TXID или нажмите «❌ Отмена».")
         return
     if current_state is None:
+        app_kb = webapp_inline_keyboard()
         await message.answer(
-            "❓ Неизвестная команда. Используйте меню.",
-            reply_markup=main_keyboard(is_admin(message.from_user.id))
+            "👋 Всё управление Gigabyte — в приложении. Откройте его кнопкой ниже"
+            + (" или командой /start." if app_kb is None else ":"),
+            reply_markup=app_kb or ReplyKeyboardRemove()
         )
 
 @router.errors()
