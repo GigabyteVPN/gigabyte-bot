@@ -162,6 +162,14 @@ def generate_request_id() -> str:
     return f"REQ-{secrets.token_hex(6).upper()}"
 
 # ====================== ВАЛИДАЦИЯ ======================
+def coerce_tg_id(value: Any) -> int:
+    """tgId для 3x-ui должен быть числом (int64). Приводим к int,
+    иначе панель отклоняет клиента: 'cannot unmarshal string ... tgId'."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return 0
+
 def is_valid_tx_hash(tx_hash: str) -> bool:
     """Строгая валидация TXID Ethereum/Arbitrum."""
     return bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_hash))
@@ -703,21 +711,71 @@ class XUIApi:
             return False
 
     async def remove_client(self, client_uuid: str) -> bool:
+        """Удаляет клиента из инбаунда.
+
+        Сначала пробуем стандартные эндпоинты 3x-ui (delClient), а если
+        версия/форк панели их не поддерживает (404) — удаляем клиента
+        через полное обновление инбаунда (GET → убрать из clients → update),
+        как и при добавлении. Это делает бота совместимым с разными
+        версиями/форками 3x-ui."""
         if not self.cookies and not await self.login():
             return False
-        payload = {"id": self.server["inbound_id"], "clientId": client_uuid}
-        url = f"{self.base_url}/panel/api/inbounds/delClient"
         headers = {"Content-Type": "application/json"}
         if self.csrf_token:
             headers["X-CSRF-TOKEN"] = self.csrf_token
+
+        # Попытка 1: официальные эндпоинты delClient (разные версии панели)
+        inbound_id = self.server["inbound_id"]
+        for url in (
+            f"{self.base_url}/panel/api/inbounds/{inbound_id}/delClient/{client_uuid}",
+            f"{self.base_url}/panel/api/inbounds/delClient/{client_uuid}",
+        ):
+            try:
+                r = await self.client.post(url, json={}, cookies=self.cookies, headers=headers)
+                if r.status_code == 200 and r.json().get("success", False):
+                    logger.info(f"✅ Клиент {client_uuid} удалён из панели {self.server['name']}")
+                    return True
+            except Exception:
+                pass
+
+        # Попытка 2: удаление через обновление инбаунда
+        url_get = f"{self.base_url}/panel/api/inbounds/get/{inbound_id}"
         try:
-            r = await self.client.post(url, json=payload, cookies=self.cookies, headers=headers)
-            if r.status_code == 200 and r.json().get("success", False):
-                logger.info(f"✅ Клиент {client_uuid} удалён из панели {self.server['name']}")
-                return True
-            else:
-                logger.error(f"❌ Ошибка удаления клиента {client_uuid}")
+            r_get = await self.client.get(url_get, cookies=self.cookies, headers=headers)
+            if r_get.status_code != 200:
+                logger.error(f"❌ Не удалось получить inbound для удаления: {r_get.status_code}")
                 return False
+            data = r_get.json()
+            if not data.get("success"):
+                logger.error("❌ Ошибка получения inbound для удаления")
+                return False
+            inbound = data.get("obj", {})
+            update_payload = {k: v for k, v in inbound.items() if k not in ("id", "settings")}
+            update_payload["id"] = inbound.get("id")
+            settings = inbound.get("settings")
+            if isinstance(settings, str):
+                settings = json.loads(settings)
+            elif not isinstance(settings, dict):
+                settings = {}
+            clients = settings.get("clients", [])
+            new_clients = [c for c in clients if c.get("id") != client_uuid]
+            if len(new_clients) == len(clients):
+                logger.info(f"ℹ️ Клиент {client_uuid} уже отсутствует в панели {self.server['name']}")
+                return True
+            settings["clients"] = new_clients
+            update_payload["settings"] = json.dumps(settings)
+
+            url_put = f"{self.base_url}/panel/api/inbounds/update/{inbound_id}"
+            r_put = await self.client.put(url_put, json=update_payload, cookies=self.cookies, headers=headers)
+            if r_put.status_code == 200 and r_put.json().get("success"):
+                logger.info(f"✅ Клиент {client_uuid} удалён (update) из панели {self.server['name']}")
+                return True
+            r_post = await self.client.post(url_put, json=update_payload, cookies=self.cookies, headers=headers)
+            if r_post.status_code == 200 and r_post.json().get("success"):
+                logger.info(f"✅ Клиент {client_uuid} удалён (update POST) из панели {self.server['name']}")
+                return True
+            logger.error(f"❌ Ошибка удаления клиента {client_uuid} через update: {r_post.text[:200]}")
+            return False
         except Exception as e:
             logger.error(f"❌ Ошибка удаления клиента: {e}")
             return False
@@ -960,7 +1018,7 @@ async def sync_all_servers_with_supabase() -> dict:
                     "totalGB": 0,
                     "expiryTime": expiry,
                     "enable": is_enable,
-                    "tgId": str(db_client.get("user_id") or ""),
+                    "tgId": coerce_tg_id(db_client.get("user_id")),
                     "subId": db_client.get("sub_id"),
                     "reset": 0,
                 }
@@ -1412,7 +1470,7 @@ async def create_subscription(
         "totalGB": 0,
         "expiryTime": expiry,
         "enable": True,
-        "tgId": str(user_id),
+        "tgId": coerce_tg_id(user_id),
         "subId": sub_id,
         "comment": f"Payment {payment_uid}" if payment_uid else "Admin created",
         "reset": 0
