@@ -146,6 +146,11 @@ export const api = {
   closeTicket: (ticketId: string) => request('POST', `/api/tickets/${ticketId}/close`, {}),
   requestCountry: (country: string) => request('POST', '/api/country-requests', { country }),
   deleteAccount: () => request('DELETE', '/api/account'),
+  subStats: (subId: string) =>
+    request<{ available: boolean; up: number; down: number; online: boolean }>(
+      'GET',
+      `/api/subscriptions/${subId}/stats`,
+    ),
 
   // ---------- Админские методы ----------
   admin: {
@@ -168,6 +173,17 @@ export const api = {
     sync: () => request<any>('POST', '/api/admin/sync', {}),
     importClients: () => request<any>('POST', '/api/admin/import', {}),
     servers: () => request<any[]>('GET', '/api/admin/servers'),
+    createServer: (body: Record<string, unknown>) => request<any>('POST', '/api/admin/servers', body),
+    updateServer: (id: number, body: Record<string, unknown>) =>
+      request<any>('POST', `/api/admin/servers/${id}`, body),
+    deleteServer: (id: number) => request('DELETE', `/api/admin/servers/${id}`),
+    testServer: (id: number) =>
+      request<{ ok: boolean; error?: string; inbounds?: { id: number; remark: string; port: number; protocol: string; enable: boolean; clients: number }[] }>(
+        'POST',
+        `/api/admin/servers/${id}/test`,
+        {},
+      ),
+    panelStatus: () => request<any>('GET', '/api/admin/panel-status'),
     users: (limit = 100) => request<any[]>('GET', `/api/admin/users?limit=${limit}`),
     deleteUser: (userId: number) => request('DELETE', `/api/admin/users/${userId}`),
   },

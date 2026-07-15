@@ -722,6 +722,40 @@ class XUIApi:
             logger.error(f"❌ Ошибка удаления клиента: {e}")
             return False
 
+    async def list_inbounds(self) -> List[dict]:
+        """Полный список инбаундов панели со статистикой клиентов
+        (clientStats: трафик up/down, expiryTime, enable per client)."""
+        if not self.cookies and not await self.login():
+            return []
+        url = f"{self.base_url}/panel/api/inbounds/list"
+        try:
+            r = await self.client.get(url, cookies=self.cookies)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"):
+                    return data.get("obj", []) or []
+        except Exception as e:
+            logger.error(f"❌ Ошибка list_inbounds ({self.server.get('name')}): {e}")
+        return []
+
+    async def get_online_emails(self) -> List[str]:
+        """Список email клиентов, которые онлайн прямо сейчас."""
+        if not self.cookies and not await self.login():
+            return []
+        url = f"{self.base_url}/panel/api/inbounds/onlines"
+        headers = {"Content-Type": "application/json"}
+        if self.csrf_token:
+            headers["X-CSRF-TOKEN"] = self.csrf_token
+        try:
+            r = await self.client.post(url, json={}, cookies=self.cookies, headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"):
+                    return data.get("obj") or []
+        except Exception as e:
+            logger.error(f"❌ Ошибка get_online_emails ({self.server.get('name')}): {e}")
+        return []
+
     async def get_clients(self) -> List[dict]:
         if not self.cookies and not await self.login():
             return []
@@ -1331,8 +1365,11 @@ def get_server_ip(server: dict) -> str:
     return server.get("ip") or server.get("server_ip") or os.getenv("SERVER_IP", "185.193.89.183")
 
 def generate_subscription_link(server: dict, sub_id: str) -> str:
-    sub_port = server.get("sub_port", server.get("client_port", 443))
-    return f"https://{get_server_ip(server)}:{sub_port}/{server['sub_path']}/{sub_id}"
+    # ИСПРАВЛЕНИЕ: sub_path через .get — отсутствие колонки/значения в БД
+    # больше не роняет создание подписки с KeyError.
+    sub_port = server.get("sub_port") or server.get("client_port") or 443
+    sub_path = (server.get("sub_path") or "sub").strip("/")
+    return f"https://{get_server_ip(server)}:{sub_port}/{sub_path}/{sub_id}"
 
 def generate_config_for_connection(sub_link: str) -> str:
     return (

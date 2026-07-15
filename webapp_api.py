@@ -1168,22 +1168,207 @@ async def api_admin_import(request: web.Request) -> web.Response:
     return ok(stats)
 
 
+# Поля сервера, которые админ может создавать/менять из веб-аппа
+SERVER_EDITABLE_FIELDS = (
+    "name", "flag", "ip", "server_ip", "panel_url", "panel_login",
+    "panel_pass", "inbound_id", "sub_port", "sub_path", "is_active",
+)
+
+def _admin_server_view(s: dict) -> dict:
+    """Представление сервера для админки: всё, кроме пароля панели."""
+    return {
+        "id": s.get("id"),
+        "name": s.get("name"),
+        "flag": s.get("flag"),
+        "ip": s.get("ip") or s.get("server_ip"),
+        "is_active": s.get("is_active", True),
+        "inbound_id": s.get("inbound_id"),
+        "panel_url": s.get("panel_url"),
+        "panel_login": s.get("panel_login"),
+        "has_password": bool(s.get("panel_pass")),
+        "sub_port": s.get("sub_port"),
+        "sub_path": s.get("sub_path"),
+    }
+
+
+async def api_admin_server_create(request: web.Request) -> web.Response:
+    body = await request.json()
+    row = {k: body[k] for k in SERVER_EDITABLE_FIELDS if k in body and body[k] is not None}
+    if not row.get("name") or not row.get("panel_url"):
+        return err("Минимум нужны название и URL панели")
+    try:
+        res = await B.supabase.table("servers").insert(row).execute()
+    except Exception as e:
+        return err(f"Ошибка БД: {e}", 500)
+    return ok(_admin_server_view(res.data[0]))
+
+
+async def api_admin_server_update(request: web.Request) -> web.Response:
+    sid = request.match_info["server_id"]
+    if not sid.isdigit():
+        return err("Неверный ID")
+    body = await request.json()
+    # Пустой пароль = «не менять»
+    updates = {}
+    for k in SERVER_EDITABLE_FIELDS:
+        if k in body:
+            if k == "panel_pass" and not body[k]:
+                continue
+            updates[k] = body[k]
+    if not updates:
+        return err("Нет изменений")
+    try:
+        res = await B.supabase.table("servers").update(updates).eq("id", int(sid)).execute()
+    except Exception as e:
+        return err(f"Ошибка БД: {e}", 500)
+    if not res.data:
+        return err("Сервер не найден", 404)
+    return ok(_admin_server_view(res.data[0]))
+
+
+async def api_admin_server_delete(request: web.Request) -> web.Response:
+    sid = request.match_info["server_id"]
+    if not sid.isdigit():
+        return err("Неверный ID")
+    subs = await B.supabase.table("subscriptions").select("id", count="exact").eq(
+        "server_id", int(sid)).eq("status", "active").execute()
+    if subs.count:
+        return err(f"На сервере {subs.count} активных подписок — сначала перенесите или удалите их")
+    await B.supabase.table("servers").delete().eq("id", int(sid)).execute()
+    return ok()
+
+
+async def api_admin_server_test(request: web.Request) -> web.Response:
+    """Проверка подключения к панели: логин + список инбаундов,
+    чтобы админ выбрал правильный inbound_id прямо из веб-аппа."""
+    sid = request.match_info["server_id"]
+    if not sid.isdigit():
+        return err("Неверный ID")
+    res = await B.supabase.table("servers").select("*").eq("id", int(sid)).execute()
+    if not res.data:
+        return err("Сервер не найден", 404)
+    server = res.data[0]
+    if not server.get("panel_url"):
+        return err("У сервера не задан URL панели")
+
+    xui = B.XUIApi(server)
+    try:
+        if not await xui.login():
+            return ok({"ok": False, "error": "Не удалось войти в панель: проверьте URL, логин и пароль"})
+        inbounds = await xui.list_inbounds()
+        return ok({
+            "ok": True,
+            "inbounds": [
+                {
+                    "id": ib.get("id"),
+                    "remark": ib.get("remark"),
+                    "port": ib.get("port"),
+                    "protocol": ib.get("protocol"),
+                    "enable": ib.get("enable"),
+                    "clients": len(ib.get("clientStats") or []),
+                }
+                for ib in inbounds
+            ],
+        })
+    finally:
+        await xui.close()
+
+
+async def api_admin_panel_status(request: web.Request) -> web.Response:
+    """Живой статус всех панелей: онлайн-клиенты, трафик, инбаунды.
+    Данные берутся напрямую из 3x-ui в момент запроса."""
+    servers = await B.load_servers_from_supabase()
+    result = []
+    totals = {"up": 0, "down": 0, "online": 0, "clients": 0}
+    seen_panels: Dict[str, dict] = {}
+
+    for server in servers:
+        key = (server.get("panel_url") or "").rstrip("/")
+        cached = seen_panels.get(key)
+        if cached is None:
+            xui = B.XUIApi(server)
+            panel: Dict[str, Any] = {"reachable": False, "inbounds": [], "onlines": []}
+            try:
+                if await xui.login():
+                    panel["reachable"] = True
+                    panel["inbounds"] = await xui.list_inbounds()
+                    panel["onlines"] = await xui.get_online_emails()
+            except Exception as e:
+                logger.warning(f"panel-status {server.get('name')}: {e}")
+            finally:
+                await xui.close()
+            seen_panels[key] = panel
+            cached = panel
+
+        inbound = next((ib for ib in cached["inbounds"] if ib.get("id") == server.get("inbound_id")), None)
+        stats = (inbound or {}).get("clientStats") or []
+        inbound_emails = {c.get("email") for c in stats}
+        online_here = [e for e in cached["onlines"] if e in inbound_emails]
+        up = sum((c.get("up") or 0) for c in stats)
+        down = sum((c.get("down") or 0) for c in stats)
+
+        totals["up"] += up
+        totals["down"] += down
+        totals["online"] += len(online_here)
+        totals["clients"] += len(stats)
+
+        result.append({
+            "id": server.get("id"),
+            "name": server.get("name"),
+            "flag": server.get("flag"),
+            "reachable": cached["reachable"],
+            "inbound_found": inbound is not None,
+            "inbound_id": server.get("inbound_id"),
+            "port": (inbound or {}).get("port"),
+            "clients": len(stats),
+            "online": len(online_here),
+            "online_emails": online_here[:20],
+            "up": up,
+            "down": down,
+        })
+
+    return ok({"servers": result, "totals": totals})
+
+
+async def api_sub_stats(request: web.Request) -> web.Response:
+    """Трафик и онлайн-статус подписки пользователя — из панели 3x-ui."""
+    user_id = request["user_id"]
+    sub_id = request.match_info["sub_id"]
+    res = await B.supabase.table("subscriptions").select("user_id, server_id, email").eq(
+        "sub_id", sub_id).execute()
+    if not res.data or res.data[0]["user_id"] != user_id:
+        return err("Подписка не найдена", 404)
+    sub = res.data[0]
+    servers = await B.load_servers_from_supabase()
+    server = next((s for s in servers if s["id"] == sub["server_id"]), None)
+    if not server:
+        return err("Сервер не найден", 404)
+
+    xui = B.XUIApi(server)
+    try:
+        if not await xui.login():
+            return ok({"available": False})
+        inbounds = await xui.list_inbounds()
+        inbound = next((ib for ib in inbounds if ib.get("id") == server.get("inbound_id")), None)
+        stats = (inbound or {}).get("clientStats") or []
+        me = next((c for c in stats if c.get("email") == sub.get("email")), None)
+        onlines = await xui.get_online_emails()
+        return ok({
+            "available": me is not None,
+            "up": (me or {}).get("up") or 0,
+            "down": (me or {}).get("down") or 0,
+            "online": sub.get("email") in onlines,
+        })
+    finally:
+        await xui.close()
+
+
 async def api_admin_servers(request: web.Request) -> web.Response:
     # ИСПРАВЛЕНИЕ: select конкретных колонок падал с 500, если в таблице
     # нет какой-то из них (например, flag или ip). Берём все строки и
     # отдаём только безопасное подмножество полей.
     res = await B.supabase.table("servers").select("*").execute()
-    out = []
-    for s in res.data or []:
-        out.append({
-            "id": s.get("id"),
-            "name": s.get("name"),
-            "flag": s.get("flag"),
-            "ip": s.get("ip") or s.get("server_ip"),
-            "is_active": s.get("is_active", True),
-            "inbound_id": s.get("inbound_id"),
-        })
-    return ok(out)
+    return ok([_admin_server_view(s) for s in res.data or []])
 
 
 async def api_admin_users(request: web.Request) -> web.Response:
@@ -1282,6 +1467,7 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/country-requests", api_country_request)
     r.add_delete("/api/account", api_delete_account)
     r.add_get("/api/public/reminder.ics", api_public_reminder_ics)
+    r.add_get("/api/subscriptions/{sub_id}/stats", api_sub_stats)
     # Админские
     r.add_get("/api/admin/stats", api_admin_stats)
     r.add_get("/api/admin/rates", api_admin_rates)
@@ -1298,6 +1484,11 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/admin/sync", api_admin_sync)
     r.add_post("/api/admin/import", api_admin_import)
     r.add_get("/api/admin/servers", api_admin_servers)
+    r.add_post("/api/admin/servers", api_admin_server_create)
+    r.add_post("/api/admin/servers/{server_id}", api_admin_server_update)
+    r.add_delete("/api/admin/servers/{server_id}", api_admin_server_delete)
+    r.add_post("/api/admin/servers/{server_id}/test", api_admin_server_test)
+    r.add_get("/api/admin/panel-status", api_admin_panel_status)
     r.add_get("/api/admin/users", api_admin_users)
     r.add_delete("/api/admin/users/{user_id}", api_admin_delete_user)
 

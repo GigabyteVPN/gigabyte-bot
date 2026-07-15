@@ -26,7 +26,7 @@ import {
   Lock,
   AlertTriangle,
 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatBytes } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -66,6 +66,34 @@ const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
 };
 
 const isFree = (p: Payment) => !p.amount_rub || Number(p.amount_rub) === 0 || p.method === 'trial';
+
+// Живой трафик и онлайн-статус подписки (тянется из панели 3x-ui)
+const SubTraffic = ({ subId }: { subId: string }) => {
+  const [data, setData] = useState<{ up: number; down: number; online: boolean; available: boolean } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .subStats(subId)
+      .then((d) => alive && setData(d))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [subId]);
+
+  if (!data || !data.available) return null;
+  const total = (data.up || 0) + (data.down || 0);
+  return (
+    <div className="flex flex-col items-end">
+      <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
+        {data.online && <span className="w-1.5 h-1.5 rounded-full bg-[#32D74B] shadow-[0_0_6px_rgba(50,215,75,0.9)]" />}
+        {data.online ? 'Онлайн' : 'Трафик'}
+      </span>
+      <span className="text-[16px] font-semibold text-white font-mono">{formatBytes(total)}</span>
+    </div>
+  );
+};
 
 // Зубчатый край чека (как у отрывной бумажной ленты)
 const ReceiptEdge = ({ flip = false }: { flip?: boolean }) => (
@@ -591,11 +619,14 @@ export default function Dashboard() {
                       </div>
 
                       {isActive && (
-                        <div className="flex flex-col mt-3">
-                          <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5">
-                            Осталось времени
-                          </span>
-                          <CountdownTimer expiryMs={sub.expiry_date} />
+                        <div className="flex items-end justify-between mt-3 gap-3">
+                          <div className="flex flex-col">
+                            <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5">
+                              Осталось времени
+                            </span>
+                            <CountdownTimer expiryMs={sub.expiry_date} />
+                          </div>
+                          <SubTraffic subId={sub.sub_id} />
                         </div>
                       )}
                     </div>

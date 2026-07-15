@@ -3,7 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { api, Ticket, Tariff } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback } from '../lib/telegram';
-import { cn } from '../lib/utils';
+import { cn, formatBytes } from '../lib/utils';
 import { motion } from 'motion/react';
 import { BottomNav, NavTab } from '../components/layout/BottomNav';
 import {
@@ -27,6 +27,9 @@ import {
   MessageSquare,
   Activity,
   Cpu,
+  Plus,
+  Settings2,
+  ChevronLeft,
 } from 'lucide-react';
 
 // ============================================================
@@ -1315,10 +1318,213 @@ function ClientsPage() {
 //  СЕРВЕРЫ
 // ============================================================
 
+const emptyServer = {
+  id: 0,
+  name: '',
+  flag: '',
+  ip: '',
+  panel_url: '',
+  panel_login: '',
+  panel_pass: '',
+  inbound_id: '',
+  sub_port: '',
+  sub_path: '',
+  is_active: true,
+};
+
+// Редактор сервера (создание / изменение) с проверкой панели
+function ServerEditor({ server, onClose, onSaved }: { server: any | null; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<any>(server ? { ...emptyServer, ...server, panel_pass: '' } : { ...emptyServer });
+  const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [inbounds, setInbounds] = useState<any[] | null>(null);
+  const isNew = !server;
+
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.name || !form.panel_url) {
+      tg.showAlert('Заполните название и URL панели');
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: Record<string, unknown> = {
+        name: form.name,
+        flag: form.flag,
+        ip: form.ip,
+        server_ip: form.ip,
+        panel_url: form.panel_url,
+        panel_login: form.panel_login,
+        inbound_id: form.inbound_id ? Number(form.inbound_id) : null,
+        sub_port: form.sub_port ? Number(form.sub_port) : null,
+        sub_path: form.sub_path,
+        is_active: form.is_active,
+      };
+      if (form.panel_pass) payload.panel_pass = form.panel_pass;
+      if (isNew) await api.admin.createServer(payload);
+      else await api.admin.updateServer(server.id, payload);
+      hapticFeedback.notificationOccurred('success');
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      tg.showAlert(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async () => {
+    if (isNew) {
+      tg.showAlert('Сначала сохраните сервер, затем проверьте подключение');
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await api.admin.testServer(server.id);
+      if (res.ok) {
+        hapticFeedback.notificationOccurred('success');
+        setInbounds(res.inbounds || []);
+      } else {
+        hapticFeedback.notificationOccurred('error');
+        tg.showAlert(`❌ ${res.error}`);
+      }
+    } catch (e: any) {
+      tg.showAlert(e.message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const field = (label: string, key: string, opts: { placeholder?: string; mono?: boolean; type?: string } = {}) => (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[13px] text-[#8E8E93] font-medium px-2">{label}</span>
+      <input
+        value={form[key] ?? ''}
+        onChange={(e) => set(key, e.target.value)}
+        placeholder={opts.placeholder}
+        inputMode={opts.type === 'num' ? 'numeric' : undefined}
+        className={cn(
+          'w-full h-[46px] bg-black/30 border border-white/10 rounded-2xl px-4 text-[15px] text-white placeholder:text-white/25 focus:outline-none focus:border-[#0A84FF]/60',
+          opts.mono && 'font-mono text-[13px]',
+        )}
+      />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[160] flex flex-col bg-[#0C0C10] overflow-y-auto hidden-scrollbar">
+      <div
+        className="px-4 pb-10 flex flex-col gap-4"
+        style={{
+          paddingTop:
+            'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
+        }}
+      >
+        <header className="flex items-center gap-3 mb-1">
+          <button
+            onClick={onClose}
+            className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          >
+            <ChevronLeft className="w-6 h-6 text-white" />
+          </button>
+          <h1 className="text-[24px] font-bold tracking-tight">{isNew ? 'Новый сервер' : 'Настройки сервера'}</h1>
+        </header>
+
+        <div className="grid grid-cols-[1fr_auto] gap-3">
+          {field('Название', 'name', { placeholder: 'Россия' })}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-[#8E8E93] font-medium px-2">Флаг</span>
+            <input
+              value={form.flag ?? ''}
+              onChange={(e) => set('flag', e.target.value)}
+              placeholder="🇷🇺"
+              className="w-[64px] h-[46px] bg-black/30 border border-white/10 rounded-2xl px-3 text-[20px] text-center focus:outline-none focus:border-[#0A84FF]/60 emoji-flag"
+            />
+          </div>
+        </div>
+        {field('IP сервера (для ссылки-подписки)', 'ip', { placeholder: '185.93.105.47', mono: true })}
+        {field('URL панели 3x-ui', 'panel_url', { placeholder: 'https://IP:PORT/path', mono: true })}
+        <div className="grid grid-cols-2 gap-3">
+          {field('Логин панели', 'panel_login', { placeholder: 'admin' })}
+          {field('Пароль панели', 'panel_pass', { placeholder: isNew ? '••••' : 'не менять' })}
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {field('Inbound ID', 'inbound_id', { placeholder: '1', type: 'num' })}
+          {field('Sub-порт', 'sub_port', { placeholder: '2096', type: 'num' })}
+          {field('Sub-путь', 'sub_path', { placeholder: 'sub' })}
+        </div>
+
+        <button
+          onClick={() => set('is_active', !form.is_active)}
+          className="glass rounded-2xl px-4 py-3.5 flex items-center justify-between active:scale-[0.99] transition-transform"
+        >
+          <span className="text-[15px] text-white">Сервер активен (виден пользователям)</span>
+          <div className={cn('w-12 h-7 rounded-full p-0.5 transition-colors', form.is_active ? 'bg-[#32D74B]' : 'bg-white/15')}>
+            <motion.div layout className="w-6 h-6 rounded-full bg-white shadow" style={{ marginLeft: form.is_active ? 20 : 0 }} />
+          </div>
+        </button>
+
+        {/* Проверка панели → показывает доступные инбаунды */}
+        <button
+          onClick={test}
+          disabled={testing}
+          className="btn-glass rounded-full py-3.5 flex items-center justify-center gap-2 text-white font-semibold text-[15px] active:scale-[0.98] transition-transform disabled:opacity-60"
+        >
+          {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Activity className="w-5 h-5 text-[#4DA6FF]" />}
+          Проверить подключение к панели
+        </button>
+
+        {inbounds && (
+          <Card className="p-1">
+            <div className="text-[12px] text-[#8E8E93] px-4 pt-3 pb-1">
+              Найдено инбаундов: {inbounds.length}. Нажмите, чтобы выбрать Inbound ID:
+            </div>
+            {inbounds.map((ib) => (
+              <button
+                key={ib.id}
+                onClick={() => {
+                  set('inbound_id', String(ib.id));
+                  hapticFeedback.selectionChanged();
+                }}
+                className={cn(
+                  'w-full px-4 py-3 flex items-center justify-between active:bg-white/[0.05] transition-colors rounded-2xl',
+                  String(form.inbound_id) === String(ib.id) && 'bg-[#0A84FF]/15',
+                )}
+              >
+                <div className="text-left">
+                  <div className="text-[15px] font-semibold text-white">
+                    #{ib.id} · {ib.remark || ib.protocol}
+                  </div>
+                  <div className="text-[12px] text-white/45">
+                    порт {ib.port} · {ib.clients} клиентов {ib.enable ? '' : '· выключен'}
+                  </div>
+                </div>
+                {String(form.inbound_id) === String(ib.id) && <Check className="w-5 h-5 text-[#4DA6FF]" />}
+              </button>
+            ))}
+          </Card>
+        )}
+
+        <button
+          onClick={save}
+          disabled={busy}
+          className="w-full py-4 btn-primary rounded-full text-white font-bold text-[16px] disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-transform mt-1"
+        >
+          {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+          {isNew ? 'Создать сервер' : 'Сохранить'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ServersPage() {
   const { data: servers, loading, reload } = useAsyncData(() => api.admin.servers());
+  const { data: status, loading: statusLoading, reload: reloadStatus } = useAsyncData(() => api.admin.panelStatus());
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [editor, setEditor] = useState<{ open: boolean; server: any | null } | null>(null);
 
   const doSync = async () => {
     if (syncing) return;
@@ -1330,6 +1536,7 @@ function ServersPage() {
         `✅ Синхронизация завершена\n\nСерверов: ${s.servers_ok}/${s.servers_total}\nИмпортировано: ${s.imported}\nОбновлено: ${s.updated}\nВосстановлено: ${s.restored}`,
       );
       reload();
+      reloadStatus();
     } catch (e: any) {
       tg.showAlert(e.message);
     } finally {
@@ -1352,14 +1559,48 @@ function ServersPage() {
     }
   };
 
+  const removeServer = async (s: any) => {
+    try {
+      await api.admin.deleteServer(s.id);
+      hapticFeedback.notificationOccurred('success');
+      reload();
+      reloadStatus();
+    } catch (e: any) {
+      tg.showAlert(e.message);
+    }
+  };
+
+  if (editor?.open) {
+    return (
+      <ServerEditor
+        server={editor.server}
+        onClose={() => setEditor(null)}
+        onSaved={() => {
+          reload();
+          reloadStatus();
+        }}
+      />
+    );
+  }
+
   const list = servers || [];
-  const online = list.filter((s: any) => s.is_active).length;
+  const totals = status?.totals || { up: 0, down: 0, online: 0, clients: 0 };
+  const statusById: Record<number, any> = {};
+  (status?.servers || []).forEach((st: any) => (statusById[st.id] = st));
 
   return (
     <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
-      <PageHeader title="Серверы" />
+      <div className="flex items-start justify-between">
+        <PageHeader title="Серверы" />
+        <button
+          onClick={() => setEditor({ open: true, server: null })}
+          className="mt-3 h-11 px-4 btn-primary rounded-full flex items-center gap-1.5 text-white text-[14px] font-semibold active:scale-95 transition-transform"
+        >
+          <Plus className="w-4 h-4" /> Добавить
+        </button>
+      </div>
 
-      {/* Статус-карточка сети */}
+      {/* Живой статус сети из панелей 3x-ui */}
       <div
         className="rounded-[32px] p-6 relative overflow-hidden"
         style={{
@@ -1370,25 +1611,33 @@ function ServersPage() {
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
       >
-        <div className="flex items-center gap-2 text-[13px] uppercase tracking-wider font-semibold text-white/60 mb-2">
-          <Activity className="w-4 h-4" /> Состояние сети
-        </div>
-        <div className="flex items-end justify-between">
-          <div>
-            <div className="text-[44px] font-bold tracking-tight leading-none">
-              {loading ? '…' : `${online}/${list.length}`}
-            </div>
-            <div className="text-[13px] text-white/60 mt-2">нод в строю</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2 text-[13px] uppercase tracking-wider font-semibold text-white/60">
+            <Activity className="w-4 h-4" /> Живой статус сети
           </div>
-          <div className="flex -space-x-2">
-            {list.slice(0, 5).map((s: any) => (
-              <div
-                key={s.id}
-                className="w-10 h-10 rounded-full app-icon bg-[#1a1a20] flex items-center justify-center text-[16px] emoji-flag border-2 border-[#0c1f12]"
-              >
-                {s.flag || '🌐'}
-              </div>
-            ))}
+          <button
+            onClick={() => {
+              hapticFeedback.impactOccurred('light');
+              reloadStatus();
+            }}
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center active:scale-90 transition-transform"
+          >
+            <RefreshCw className={cn('w-4 h-4 text-white/70', statusLoading && 'animate-spin')} />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="glass-inner rounded-2xl px-4 py-3">
+            <div className="text-[11px] text-white/50 uppercase tracking-wider">Онлайн сейчас</div>
+            <div className="text-[26px] font-bold mt-0.5">
+              {statusLoading ? '…' : totals.online}
+              <span className="text-[15px] text-white/40 font-medium"> / {totals.clients}</span>
+            </div>
+          </div>
+          <div className="glass-inner rounded-2xl px-4 py-3">
+            <div className="text-[11px] text-white/50 uppercase tracking-wider">Всего трафика</div>
+            <div className="text-[22px] font-bold mt-0.5">
+              {statusLoading ? '…' : formatBytes(totals.up + totals.down)}
+            </div>
           </div>
         </div>
       </div>
@@ -1411,49 +1660,83 @@ function ServersPage() {
             {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
             {importing ? 'Импорт…' : 'Импорт клиентов из панели'}
           </button>
-          <div className="text-[12px] text-[#8E8E93] px-1">
-            Синхронизация сверяет клиентов панелей 3x-ui с базой: импортирует новых, обновляет сроки и восстанавливает
-            пропавших.
-          </div>
         </Card>
       </Section>
 
       <Section title="Наши ноды">
         {loading ? (
           <Spinner />
-        ) : (
-          <Card>
-            {list.map((s: any) => (
-              <div key={s.id} className="px-5 py-4 flex items-center gap-3.5 border-b border-white/[0.06] last:border-b-0">
-                <div className="w-11 h-11 rounded-2xl app-icon bg-gradient-to-b from-white/[0.14] to-white/[0.04] flex items-center justify-center text-[20px] emoji-flag shrink-0">
-                  {s.flag || <Cpu className="w-5 h-5 text-white/60" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[16px] font-semibold text-white flex items-center gap-2">
-                    {s.name}
-                    <span
-                      className={cn(
-                        'w-2 h-2 rounded-full shrink-0',
-                        s.is_active ? 'bg-[#32D74B] shadow-[0_0_8px_rgba(50,215,75,0.9)]' : 'bg-[#FF453A]',
-                      )}
-                    />
-                  </div>
-                  {s.ip && <CopyCode value={s.ip} className="text-[12px] text-white/45" />}
-                </div>
-                <div className="text-right shrink-0">
-                  <div
-                    className={cn(
-                      'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full',
-                      s.is_active ? 'bg-[#32D74B]/15 text-[#32D74B]' : 'bg-[#FF453A]/15 text-[#FF6961]',
-                    )}
-                  >
-                    {s.is_active ? 'Online' : 'Off'}
-                  </div>
-                  <div className="text-[11px] text-white/35 mt-1">inbound {s.inbound_id}</div>
-                </div>
-              </div>
-            ))}
+        ) : list.length === 0 ? (
+          <Card className="p-8 text-center">
+            <div className="text-[15px] text-white/60 mb-4">Серверов пока нет</div>
+            <button
+              onClick={() => setEditor({ open: true, server: null })}
+              className="px-6 py-3 btn-primary rounded-full text-white font-semibold text-[15px]"
+            >
+              Добавить первый сервер
+            </button>
           </Card>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {list.map((s: any) => {
+              const st = statusById[s.id];
+              const reachable = st?.reachable;
+              return (
+                <Card key={s.id} className="p-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-2xl app-icon bg-gradient-to-b from-white/[0.14] to-white/[0.04] flex items-center justify-center text-[20px] emoji-flag shrink-0">
+                      {s.flag || <Cpu className="w-5 h-5 text-white/60" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[16px] font-semibold text-white flex items-center gap-2">
+                        {s.name}
+                        <span
+                          className={cn(
+                            'w-2 h-2 rounded-full shrink-0',
+                            reachable ? 'bg-[#32D74B] shadow-[0_0_8px_rgba(50,215,75,0.9)]' : st ? 'bg-[#FF453A]' : 'bg-white/25',
+                          )}
+                        />
+                      </div>
+                      {s.ip && <CopyCode value={s.ip} className="text-[12px] text-white/45" />}
+                    </div>
+                    <button
+                      onClick={() => setEditor({ open: true, server: s })}
+                      className="w-9 h-9 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
+                    >
+                      <Settings2 className="w-4 h-4 text-white/70" />
+                    </button>
+                  </div>
+
+                  {/* Живые метрики ноды */}
+                  <div className="grid grid-cols-3 gap-2 mt-3.5">
+                    <div className="glass-inner rounded-2xl px-3 py-2 text-center">
+                      <div className="text-[16px] font-bold text-[#32D74B]">{st ? st.online : '—'}</div>
+                      <div className="text-[10px] text-white/45 uppercase tracking-wider">онлайн</div>
+                    </div>
+                    <div className="glass-inner rounded-2xl px-3 py-2 text-center">
+                      <div className="text-[16px] font-bold text-white">{st ? st.clients : '—'}</div>
+                      <div className="text-[10px] text-white/45 uppercase tracking-wider">клиентов</div>
+                    </div>
+                    <div className="glass-inner rounded-2xl px-3 py-2 text-center">
+                      <div className="text-[14px] font-bold text-[#4DA6FF]">{st ? formatBytes(st.up + st.down) : '—'}</div>
+                      <div className="text-[10px] text-white/45 uppercase tracking-wider">трафик</div>
+                    </div>
+                  </div>
+
+                  {st && !st.inbound_found && reachable && (
+                    <div className="mt-3 text-[12px] text-[#FF9F0A] bg-[#FF9F0A]/10 rounded-2xl px-3 py-2">
+                      ⚠️ Inbound #{s.inbound_id} не найден в панели. Откройте настройки → «Проверить подключение», чтобы выбрать верный.
+                    </div>
+                  )}
+                  {st && !reachable && (
+                    <div className="mt-3 text-[12px] text-[#FF6961] bg-[#FF453A]/10 rounded-2xl px-3 py-2">
+                      ❌ Панель недоступна — проверьте URL, логин и пароль в настройках.
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
         )}
       </Section>
     </div>
