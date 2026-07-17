@@ -293,17 +293,28 @@ function CountryPage({ countries, onBack }: { countries: string[]; onBack: () =>
         <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-3 ml-4">
           {t('sup.popular')}
         </div>
-        <div className="flex flex-wrap gap-2.5 mb-7">
-          {countries.map((c) => (
-            <button
-              key={c}
-              onClick={() => send(c)}
-              disabled={busy}
-              className="glass rounded-full px-5 py-3 text-[15px] font-semibold text-white active:scale-[0.95] transition-transform disabled:opacity-50 emoji-flag"
-            >
-              {c}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2.5 mb-7">
+          {countries.map((c) => {
+            // Отделяем флаг-эмодзи (2 regional indicator символа) от названия,
+            // чтобы флаг стоял ровно в своём кружке, а текст — отдельно.
+            const m = c.match(/^(\p{RI}\p{RI})\s*(.*)$/u);
+            const flag = m ? m[1] : '';
+            const name = m ? m[2] : c;
+            return (
+              <button
+                key={c}
+                onClick={() => send(c)}
+                disabled={busy}
+                className="ios-list p-4 flex items-center gap-3.5 active:scale-[0.98] transition-transform disabled:opacity-50 w-full"
+              >
+                <div className="w-11 h-11 rounded-full glass-inner flex items-center justify-center shrink-0">
+                  <span className="text-[24px] leading-none emoji-flag">{flag}</span>
+                </div>
+                <span className="flex-1 text-left text-[16px] font-semibold text-white">{name}</span>
+                <Send className="w-4.5 h-4.5 text-[#0A84FF] shrink-0" />
+              </button>
+            );
+          })}
         </div>
 
         <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-3 ml-4">

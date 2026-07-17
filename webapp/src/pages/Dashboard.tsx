@@ -512,42 +512,78 @@ const ReferralPage = ({
         className="shrink-0 flex items-center gap-3 px-4 pb-3"
         style={{
           paddingTop:
-            'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
+            'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 10px), 20px)',
         }}
       >
         <button
           onClick={onClose}
-          className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0"
         >
           <ChevronLeft className="w-6 h-6 text-white" />
         </button>
-        <SectionTitle className="mb-0 ml-0">{t('ref.title')}</SectionTitle>
+        <h1 className="text-[22px] font-bold tracking-tight text-white leading-none">{t('ref.title')}</h1>
       </div>
 
-      <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-2 pb-12 flex flex-col gap-5">
+      <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-3 pb-16 flex flex-col gap-5">
         {!data ? (
           <div className="flex justify-center py-16">
             <div className="animate-spin w-7 h-7 border-2 border-white/20 border-t-white rounded-full" />
           </div>
         ) : (
           <>
-            {/* Баланс */}
+            {/* Баланс + прогресс до бесплатного месяца */}
             <div className="ios-list p-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-40 h-40 bg-[#BF5AF2]/15 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
-              <div className="relative z-10 flex items-center gap-4">
-                <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
-                  <Gift className="w-7 h-7 text-[#D7A8FF]" />
-                </div>
-                <div>
-                  <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
-                    {t('ref.balance')}
+              <div className="relative z-10 flex flex-col gap-5">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
+                    <Gift className="w-7 h-7 text-[#D7A8FF]" />
                   </div>
-                  <div className="text-[34px] font-bold text-white leading-none mt-1">
-                    {data.points}
-                    <span className="text-[15px] text-[#8E8E93] font-medium ml-2">{t('ref.points')}</span>
+                  <div className="min-w-0">
+                    <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
+                      {t('ref.balance')}
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-[36px] font-bold text-white leading-none">{data.points}</span>
+                      <span className="text-[15px] text-[#8E8E93] font-medium">{t('ref.points')}</span>
+                    </div>
                   </div>
                 </div>
+
+                {/* Прогресс-бар до REF_REDEEM_COST баллов */}
+                {(() => {
+                  const pct = Math.min(100, Math.round((data.points / data.redeem_cost) * 100));
+                  const left = Math.max(0, data.redeem_cost - data.points);
+                  return (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex justify-between items-center text-[12.5px] font-medium">
+                        <span className="text-[#8E8E93]">{t('ref.progress')}</span>
+                        <span className={cn(left === 0 ? 'text-[#32D74B]' : 'text-white/70')}>
+                          {left === 0 ? t('ref.readyRedeem') : t('ref.progressLeft', { n: left })}
+                        </span>
+                      </div>
+                      <div className="h-2.5 w-full bg-white/[0.08] rounded-full overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ type: 'spring', damping: 26, stiffness: 120 }}
+                          className="h-full rounded-full"
+                          style={{
+                            background: 'linear-gradient(90deg, #BF5AF288, #BF5AF2)',
+                            boxShadow: '0 0 12px rgba(191,90,242,0.5)',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
+            </div>
+
+            {/* Мотивационный подзаголовок */}
+            <div className="flex items-center gap-3 px-1">
+              <Sparkles className="w-5 h-5 text-[#FFD60A] shrink-0" />
+              <span className="text-[15px] text-white/85 font-medium leading-snug">{t('ref.hero')}</span>
             </div>
 
             {/* Как это работает */}
@@ -1248,7 +1284,7 @@ export default function Dashboard() {
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.9 }}
-              className="glass-sheet rounded-[32px] p-6 w-full max-w-[360px] border border-white/10"
+              className="glass-sheet rounded-[36px] p-6 w-full max-w-[360px] border border-white/10"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex flex-col items-center text-center gap-3 mb-5">
@@ -1261,13 +1297,13 @@ export default function Dashboard() {
               <div className="flex flex-col gap-2.5">
                 <button
                   onClick={deleteAccount}
-                  className="w-full py-3.5 btn-danger rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
+                  className="w-full py-3.5 btn-danger rounded-full text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
                 >
                   {t('dash.deleteConfirm')}
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className="w-full py-3.5 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
+                  className="w-full py-3.5 btn-glass rounded-full text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
                 >
                   {t('common.cancel')}
                 </button>

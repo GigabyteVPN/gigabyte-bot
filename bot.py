@@ -75,9 +75,10 @@ PRIVACY_URL: str = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-07-01-51"
 
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
 # Экономика баллов: приглашённый запустил бота → рефереру +REF_POINTS_SIGNUP;
-# приглашённый впервые оплатил → рефереру +REF_POINTS_PURCHASE.
-# REF_REDEEM_COST баллов можно обменять на REF_REDEEM_MONTHS месяц(ев) VPN.
-REF_POINTS_SIGNUP: int = 10
+# приглашённый впервые оплатил → рефереру +REF_POINTS_PURCHASE (ускоритель).
+# REF_REDEEM_COST баллов = REF_REDEEM_MONTHS месяц(ев) VPN, то есть
+# 5 приглашённых друзей (5 × 20 = 100) = 1 месяц бесплатно.
+REF_POINTS_SIGNUP: int = 20
 REF_POINTS_PURCHASE: int = 50
 REF_REDEEM_COST: int = 100
 REF_REDEEM_MONTHS: int = 1
@@ -2160,19 +2161,18 @@ async def cmd_start(message: Message):
                              reply_markup=ReplyKeyboardRemove())
         return
 
-    # Администратор — сразу к приложению-панели.
+    # Администратор — сразу к приложению-панели (кнопка в этом же сообщении).
     if is_admin(user_id):
         await message.answer(
             "👋 <b>Админ-панель Gigabyte</b>\n\n"
             "Вся панель управления теперь в приложении: статистика, продажи, "
             "поддержка, клиенты и серверы. Откройте его кнопкой ниже 👇",
             parse_mode=ParseMode.HTML,
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=app_kb
         )
-        await message.answer("📱 Открыть панель управления:", reply_markup=app_kb)
         return
 
-    # Пользователь уже принял условия — сразу приглашаем в приложение.
+    # Пользователь уже принял условия — кнопка приложения в этом же сообщении.
     if await has_accepted_terms(user_id):
         await message.answer(
             "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
@@ -2181,9 +2181,8 @@ async def cmd_start(message: Message):
             "📶 Безопасность в публичных сетях Wi-Fi\n\n"
             "Всё управление — в приложении: покупка, продление, подключение и поддержка.",
             parse_mode=ParseMode.HTML,
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=app_kb
         )
-        await message.answer("📱 Открыть приложение:", reply_markup=app_kb)
         return
 
     # Иначе — карточка с принятием условий (её можно принять и в приложении).
@@ -2202,16 +2201,11 @@ async def accept_terms_callback(callback: CallbackQuery):
         )
     except Exception:
         pass
-    await callback.message.answer(
-        "Готово! Всё управление подпиской — в приложении.",
-        reply_markup=ReplyKeyboardRemove()
-    )
     app_kb = webapp_inline_keyboard()
-    if app_kb:
-        await callback.message.answer(
-            "📱 Открыть приложение:",
-            reply_markup=app_kb
-        )
+    await callback.message.answer(
+        "Готово! Всё управление подпиской — в приложении. Откройте его кнопкой ниже 👇",
+        reply_markup=app_kb
+    )
     await callback.answer("Условия приняты ✅")
 
 # ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ (КНОПКИ МЕНЮ) ======================

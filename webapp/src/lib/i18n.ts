@@ -113,7 +113,11 @@ const dict: Dict = {
 
   // ---------- Рефералка ----------
   'ref.card': { ru: 'Пригласить друзей', en: 'Invite friends' },
-  'ref.cardHint': { ru: 'VPN бесплатно за приглашения', en: 'Free VPN for invites' },
+  'ref.cardHint': { ru: '5 друзей = месяц VPN бесплатно', en: '5 friends = a free month of VPN' },
+  'ref.hero': { ru: 'Пригласите 5 друзей — получите месяц VPN бесплатно', en: 'Invite 5 friends — get a month of VPN for free' },
+  'ref.progress': { ru: 'До бесплатного месяца', en: 'To your free month' },
+  'ref.progressLeft': { ru: 'осталось {n} баллов', en: '{n} points to go' },
+  'ref.readyRedeem': { ru: 'Баллов достаточно — заберите месяц!', en: 'Enough points — claim your month!' },
   'ref.points': { ru: 'баллов', en: 'points' },
   'ref.title': { ru: 'Партнёрская программа', en: 'Referral program' },
   'ref.balance': { ru: 'Ваши баллы', en: 'Your points' },
