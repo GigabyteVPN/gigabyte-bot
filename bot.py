@@ -73,6 +73,15 @@ XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "
 OFFER_URL: str = "https://telegra.ph/PUBLICHNAYA-OFERTA-Dogovor-na-okazanie-uslug-07-01"
 PRIVACY_URL: str = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-07-01-51"
 
+# ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
+# Экономика баллов: приглашённый запустил бота → рефереру +REF_POINTS_SIGNUP;
+# приглашённый впервые оплатил → рефереру +REF_POINTS_PURCHASE.
+# REF_REDEEM_COST баллов можно обменять на REF_REDEEM_MONTHS месяц(ев) VPN.
+REF_POINTS_SIGNUP: int = 10
+REF_POINTS_PURCHASE: int = 50
+REF_REDEEM_COST: int = 100
+REF_REDEEM_MONTHS: int = 1
+
 COUNTRIES = [
     "🇺🇸 США", "🇬🇧 Великобритания", "🇧🇷 Бразилия",
     "🇰🇷 Южная Корея", "🇨🇦 Канада", "🇯🇵 Япония",
@@ -466,7 +475,8 @@ async def init_supabase_tables():
     tables = [
         "users", "servers", "subscriptions", "payments",
         "tickets", "ticket_messages", "country_requests",
-        "tariffs", "pending_confirmations", "promo_keys"
+        "tariffs", "pending_confirmations", "promo_keys",
+        "point_transactions",
     ]
     for table in tables:
         try:
@@ -486,24 +496,43 @@ async def init_supabase_tables():
 
     logger.info("✅ Таблицы Supabase проверены.")
 
-async def ensure_user_exists_supabase(user_id: int, username: Optional[str] = None, full_name: Optional[str] = None):
+async def ensure_user_exists_supabase(
+    user_id: int,
+    username: Optional[str] = None,
+    full_name: Optional[str] = None,
+    lang: Optional[str] = None,
+) -> bool:
+    """Создаёт/обновляет пользователя. Возвращает True, если пользователь новый."""
     await init_supabase()
     try:
         res = await supabase.table("users").select("user_id").eq("user_id", user_id).execute()
         if not res.data:
-            await supabase.table("users").insert({
+            row = {
                 "user_id": user_id,
                 "username": username,
                 "full_name": full_name,
                 "created_at": datetime.now().isoformat()
-            }).execute()
-        else:
-            await supabase.table("users").update({
-                "username": username,
-                "full_name": full_name
-            }).eq("user_id", user_id).execute()
+            }
+            if lang:
+                row["lang"] = lang
+            try:
+                await supabase.table("users").insert(row).execute()
+            except Exception:
+                # Колонки lang может не быть — вставляем без неё.
+                row.pop("lang", None)
+                await supabase.table("users").insert(row).execute()
+            return True
+        updates: Dict[str, Any] = {"username": username, "full_name": full_name}
+        if lang:
+            updates["lang"] = lang
+        try:
+            await supabase.table("users").update(updates).eq("user_id", user_id).execute()
+        except Exception:
+            updates.pop("lang", None)
+            await supabase.table("users").update(updates).eq("user_id", user_id).execute()
     except Exception as e:
         logger.error(f"❌ Ошибка в ensure_user_exists_supabase: {e}")
+    return False
 
 async def load_servers_from_supabase() -> List[Dict]:
     await init_supabase()
@@ -513,6 +542,177 @@ async def load_servers_from_supabase() -> List[Dict]:
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки серверов: {e}")
         return []
+
+# ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА: ЛОГИКА ======================
+# Все операции устойчивы к отсутствию таблицы point_transactions и колонок
+# users.referred_by/ref_points: до применения миграции функции тихо
+# отключаются (пишут предупреждение в лог), бот продолжает работать.
+
+_referral_schema_ok: Optional[bool] = None
+
+async def referral_schema_available() -> bool:
+    """Однократная проверка, что схема реферальной программы применена."""
+    global _referral_schema_ok
+    if _referral_schema_ok is not None:
+        return _referral_schema_ok
+    try:
+        await supabase.table("point_transactions").select("id").limit(1).execute()
+        await supabase.table("users").select("ref_points").limit(1).execute()
+        _referral_schema_ok = True
+    except Exception:
+        _referral_schema_ok = False
+        logger.warning(
+            "⚠️ Схема реферальной программы не применена. Выполните SQL из "
+            "migrations/2026-07-17_referral_reminders_lang.sql в Supabase SQL Editor."
+        )
+    return _referral_schema_ok
+
+async def get_user_lang(user_id: int) -> str:
+    """Язык пользователя для сообщений бота: 'ru' или 'en'."""
+    try:
+        res = await supabase.table("users").select("lang").eq("user_id", user_id).execute()
+        lang = (res.data[0].get("lang") or "ru") if res.data else "ru"
+        return "ru" if str(lang).lower().startswith(("ru", "be", "uk", "kk")) else "en"
+    except Exception:
+        return "ru"
+
+async def award_points(
+    user_id: int,
+    delta: int,
+    reason: str,
+    ref_user_id: Optional[int] = None,
+    payment_id: Optional[int] = None,
+) -> bool:
+    """Атомарно (насколько позволяет PostgREST) изменяет баланс баллов.
+
+    Порядок важен: сначала журнал (уникальные индексы отсекают дубли),
+    потом баланс. Инкремент — read-modify-write с guard'ом по старому
+    значению и тремя повторами на случай гонки."""
+    if not await referral_schema_available():
+        return False
+    try:
+        await supabase.table("point_transactions").insert({
+            "user_id": user_id, "delta": delta, "reason": reason,
+            "ref_user_id": ref_user_id, "payment_id": payment_id,
+        }).execute()
+    except Exception as e:
+        # Дубликат по уникальному индексу = бонус уже начислялся.
+        logger.info(f"Реферальный бонус не начислен ({reason}, ref={ref_user_id}): {e}")
+        return False
+    for _ in range(3):
+        try:
+            res = await supabase.table("users").select("ref_points").eq("user_id", user_id).execute()
+            if not res.data:
+                return False
+            current = int(res.data[0].get("ref_points") or 0)
+            upd = await supabase.table("users").update(
+                {"ref_points": current + delta}
+            ).eq("user_id", user_id).eq("ref_points", current).execute()
+            if upd.data:
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления баллов {user_id}: {e}")
+            return False
+    logger.error(f"Не удалось обновить баллы {user_id} после 3 попыток (гонка)")
+    return False
+
+async def handle_referral_start(user_id: int, payload: str, is_new_user: bool):
+    """Обработка deep-link /start ref_<id>: привязка + бонус за регистрацию."""
+    if not payload.startswith("ref_"):
+        return
+    ref_raw = payload[4:]
+    if not ref_raw.isdigit():
+        return
+    referrer_id = int(ref_raw)
+    if referrer_id == user_id:
+        return
+    if not await referral_schema_available():
+        return
+    try:
+        # Привязываем только новых пользователей без существующей привязки.
+        me = await supabase.table("users").select("referred_by").eq("user_id", user_id).execute()
+        if not me.data or me.data[0].get("referred_by"):
+            return
+        if not is_new_user:
+            return
+        ref_row = await supabase.table("users").select("user_id").eq("user_id", referrer_id).execute()
+        if not ref_row.data:
+            return
+        await supabase.table("users").update({"referred_by": referrer_id}).eq("user_id", user_id).execute()
+        if await award_points(referrer_id, REF_POINTS_SIGNUP, "referral_signup", ref_user_id=user_id):
+            lang = await get_user_lang(referrer_id)
+            if lang == "en":
+                text = (
+                    f"🎉 <b>+{REF_POINTS_SIGNUP} points!</b>\n\n"
+                    f"Your friend just joined Gigabyte via your link.\n"
+                    f"You'll get <b>+{REF_POINTS_PURCHASE}</b> more when they make their first purchase."
+                )
+            else:
+                text = (
+                    f"🎉 <b>+{REF_POINTS_SIGNUP} баллов!</b>\n\n"
+                    f"По вашей ссылке присоединился новый пользователь.\n"
+                    f"Когда он оформит первую покупку, вы получите ещё <b>+{REF_POINTS_PURCHASE}</b>."
+                )
+            try:
+                await bot.send_message(referrer_id, text, parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
+            logger.info(f"🤝 Реферал: {user_id} приглашён {referrer_id} (+{REF_POINTS_SIGNUP})")
+    except Exception as e:
+        logger.error(f"Ошибка обработки реферала {user_id}<-{referrer_id}: {e}")
+
+async def award_referral_purchase(payer_id: int, amount_rub: float, payment_id: Optional[int] = None):
+    """Бонус рефереру за ПЕРВУЮ платную покупку приглашённого.
+
+    Вызывается из всех точек завершения оплаты (Stars/крипто, бот/веб-апп).
+    Повторные покупки отсекаются уникальным индексом журнала."""
+    try:
+        if not amount_rub or float(amount_rub) <= 0:
+            return
+        if not await referral_schema_available():
+            return
+        me = await supabase.table("users").select("referred_by").eq("user_id", payer_id).execute()
+        referrer_id = me.data[0].get("referred_by") if me.data else None
+        if not referrer_id:
+            return
+        dup = await supabase.table("point_transactions").select("id").eq(
+            "ref_user_id", payer_id).eq("reason", "referral_purchase").execute()
+        if dup.data:
+            return
+        if await award_points(int(referrer_id), REF_POINTS_PURCHASE, "referral_purchase",
+                              ref_user_id=payer_id, payment_id=payment_id):
+            lang = await get_user_lang(int(referrer_id))
+            if lang == "en":
+                text = (
+                    f"💎 <b>+{REF_POINTS_PURCHASE} points!</b>\n\n"
+                    f"Your invited friend made their first purchase.\n"
+                    f"Balance grows — redeem {REF_REDEEM_COST} points for "
+                    f"{REF_REDEEM_MONTHS} month of VPN in the app."
+                )
+            else:
+                text = (
+                    f"💎 <b>+{REF_POINTS_PURCHASE} баллов!</b>\n\n"
+                    f"Приглашённый вами пользователь оформил первую покупку.\n"
+                    f"Копите дальше — {REF_REDEEM_COST} баллов = "
+                    f"{REF_REDEEM_MONTHS} месяц VPN бесплатно (обмен в приложении)."
+                )
+            try:
+                await bot.send_message(int(referrer_id), text, parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
+            logger.info(f"💎 Реферальный бонус за покупку: {payer_id} -> {referrer_id}")
+    except Exception as e:
+        logger.error(f"Ошибка начисления бонуса за покупку ({payer_id}): {e}")
+
+def generate_qr_png(text: str) -> bytes:
+    """PNG-байты QR-кода (для скачивания/отправки QR ссылки-подписки)."""
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(text)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    return bio.getvalue()
 
 # ====================== 3X-UI API ======================
 class XUIApi:
@@ -1235,9 +1435,21 @@ async def check_expiry_reminders(bot_instance: Bot):
     servers = await load_servers_from_supabase()
     server_map = {s["id"]: s for s in servers}
 
+    # Настройки пользователей: кому слать напоминания и на каком языке.
+    # Если колонок ещё нет (миграция не применена) — шлём всем по-русски.
+    user_prefs: Dict[int, dict] = {}
+    try:
+        rows = await fetch_all_supabase_rows("users", "user_id, reminders_enabled, lang")
+        user_prefs = {r["user_id"]: r for r in rows if r.get("user_id")}
+    except Exception:
+        pass
+
     for sub in subs:
         if sub.get("status") != "active" or not sub.get("user_id"):
             continue
+        prefs = user_prefs.get(sub["user_id"], {})
+        if prefs.get("reminders_enabled") is False:
+            continue  # пользователь отключил напоминания в приложении
         sub_id = sub.get("sub_id")
         expiry = sub.get("expiry_date") or 0
         if not sub_id or expiry <= 0:
@@ -1263,22 +1475,40 @@ async def check_expiry_reminders(bot_instance: Bot):
         server = server_map.get(sub.get("server_id"), {})
         server_name = esc(server.get("name", "Gigabyte"))
         expiry_str = datetime.fromtimestamp(expiry / 1000).strftime("%d.%m.%Y %H:%M")
+        lang_raw = str(prefs.get("lang") or "ru").lower()
+        is_en = not lang_raw.startswith(("ru", "be", "uk", "kk"))
         if target_stage == 2:
             minutes_left = max(1, int(left / 60000))
-            text = (
-                f"🚨 <b>Подписка отключится меньше чем через час!</b>\n\n"
-                f"🌍 Сервер: <b>{server_name}</b>\n"
-                f"⏰ Отключение: <b>{expiry_str}</b> (через ~{minutes_left} мин)\n\n"
-                f"Продлите сейчас, чтобы соединение не прервалось."
-            )
+            if is_en:
+                text = (
+                    f"🚨 <b>Your subscription expires in less than an hour!</b>\n\n"
+                    f"🌍 Server: <b>{server_name}</b>\n"
+                    f"⏰ Disconnects at: <b>{expiry_str}</b> (~{minutes_left} min)\n\n"
+                    f"Renew now to keep your connection alive."
+                )
+            else:
+                text = (
+                    f"🚨 <b>Подписка отключится меньше чем через час!</b>\n\n"
+                    f"🌍 Сервер: <b>{server_name}</b>\n"
+                    f"⏰ Отключение: <b>{expiry_str}</b> (через ~{minutes_left} мин)\n\n"
+                    f"Продлите сейчас, чтобы соединение не прервалось."
+                )
         else:
             hours_left = max(1, round(left / hour_ms))
-            text = (
-                f"⏳ <b>Подписка истекает через ~{hours_left} ч.</b>\n\n"
-                f"🌍 Сервер: <b>{server_name}</b>\n"
-                f"⏰ Отключение: <b>{expiry_str}</b>\n\n"
-                f"Продлите заранее — и защита не прервётся ни на секунду."
-            )
+            if is_en:
+                text = (
+                    f"⏳ <b>Your subscription expires in ~{hours_left} h.</b>\n\n"
+                    f"🌍 Server: <b>{server_name}</b>\n"
+                    f"⏰ Disconnects at: <b>{expiry_str}</b>\n\n"
+                    f"Renew in advance — stay protected without interruption."
+                )
+            else:
+                text = (
+                    f"⏳ <b>Подписка истекает через ~{hours_left} ч.</b>\n\n"
+                    f"🌍 Сервер: <b>{server_name}</b>\n"
+                    f"⏰ Отключение: <b>{expiry_str}</b>\n\n"
+                    f"Продлите заранее — и защита не прервётся ни на секунду."
+                )
         try:
             await bot_instance.send_message(
                 sub["user_id"], text,
@@ -1492,6 +1722,8 @@ async def create_subscription(
         if payment_id:
             await supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
             await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+        # Реферальный бонус за первую платную покупку приглашённого
+        await award_referral_purchase(user_id, rub_amount, payment_id)
         logger.info(f"✅ Подписка создана для {user_id} на сервере {server['name']}")
         return generate_subscription_link(server, sub_id)
     else:
@@ -1912,7 +2144,14 @@ def webapp_inline_keyboard() -> Optional[InlineKeyboardMarkup]:
 async def cmd_start(message: Message):
     await load_tariffs()
     user_id = message.from_user.id
-    await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
+    is_new_user = await ensure_user_exists_supabase(
+        user_id, message.from_user.username, message.from_user.full_name,
+        lang=message.from_user.language_code,
+    )
+    # Deep-link реферальной программы: /start ref_<telegram_id>
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) > 1:
+        await handle_referral_start(user_id, parts[1].strip(), is_new_user)
     app_kb = webapp_inline_keyboard()
     # Убираем старое нижнее меню, если оно осталось у пользователя от прошлых версий.
     if app_kb is None:
@@ -2890,6 +3129,7 @@ async def successful_payment_handler(message: Message, state: FSMContext):
             "tx_hash": provider_charge_id
         }).eq("id", payment_id).execute()
         await supabase.table("pending_confirmations").delete().eq("user_id", user_id).execute()
+        await award_referral_purchase(user_id, data.get("rub") or 0, payment_id)
         extra = "" if panel_updated else "\n⚠️ Подписка в панели не обновлена автоматически, но данные в боте изменены. Администратор уведомлён."
         await message.answer(
             f"✅ <b>Подписка успешно продлена!</b>\n\nВаша подписка активна.{extra}",
@@ -3425,6 +3665,7 @@ async def process_resend_hash(message: Message, state: FSMContext):
                         pass
             await supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
             await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+            await award_referral_purchase(user_id, pay_data.get("rub") or 0, payment_id)
             extra = "" if panel_updated else "\n⚠️ Подписка в панели не обновлена автоматически. Администратор уведомлён."
             await message.answer(
                 f"✅ <b>Подписка успешно продлена!</b>{extra}",

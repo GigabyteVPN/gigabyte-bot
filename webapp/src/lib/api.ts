@@ -56,6 +56,9 @@ export type Bootstrap = {
   contracts: { USDT: string; USDC: string };
   offer_url: string;
   privacy_url: string;
+  ref_points?: number;
+  reminders_enabled?: boolean;
+  referral?: { points_signup: number; points_purchase: number; redeem_cost: number; redeem_months: number };
 };
 
 export type Subscription = {
@@ -66,6 +69,20 @@ export type Subscription = {
   status: 'active' | 'expired';
   sub_link: string | null;
   ics_url?: string | null; // ссылка на .ics-напоминание для календаря устройства
+  qr_url?: string | null; // публичная ссылка на PNG QR-кода подписки
+};
+
+export type ReferralSummary = {
+  available: boolean;
+  link: string;
+  points: number;
+  invited_total: number;
+  invited_paid: number;
+  history: { delta: number; reason: string; created_at: string }[];
+  points_signup: number;
+  points_purchase: number;
+  redeem_cost: number;
+  redeem_months: number;
 };
 
 export const apiBase = API_BASE;
@@ -151,6 +168,16 @@ export const api = {
       'GET',
       `/api/subscriptions/${subId}/stats`,
     ),
+  referral: () => request<ReferralSummary>('GET', '/api/referral'),
+  referralRedeem: (params: { sub_id?: string; server_id?: number }) =>
+    request<{ redeemed: boolean; extended: boolean; months: number; sub_link?: string }>(
+      'POST',
+      '/api/referral/redeem',
+      params,
+    ),
+  setReminders: (enabled: boolean) =>
+    request<{ enabled: boolean }>('POST', '/api/settings/reminders', { enabled }),
+  shareSubQr: (subId: string) => request<{ sent: boolean }>('POST', `/api/subscriptions/${subId}/qr/share`, {}),
 
   // ---------- Админские методы ----------
   admin: {

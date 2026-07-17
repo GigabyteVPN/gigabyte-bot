@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ShieldCheck, FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy } from 'lucide-react';
 import { BottomNav, NavTab } from './components/layout/BottomNav';
 import { initTelegramApp, tg, hapticFeedback } from './lib/telegram';
 import { api, Bootstrap, ApiError } from './lib/api';
 import { AppContext } from './lib/AppContext';
+import { t } from './lib/i18n';
 
 import Dashboard from './pages/Dashboard';
 import Buy from './pages/Buy';
 import Instructions from './pages/Instructions';
 import Support from './pages/Support';
-import AdminApp from './pages/Admin';
+
+// Админ-панель нужна только администратору — выносим её в отдельный чанк,
+// чтобы обычные пользователи не грузили лишние ~сотни КБ при старте.
+const AdminApp = lazy(() => import('./pages/Admin'));
 
 function Spinner() {
   return (
@@ -26,13 +30,13 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
       <div className="w-16 h-16 glass rounded-full flex items-center justify-center">
         <WifiOff className="w-8 h-8 text-[#FF453A]" />
       </div>
-      <div className="text-[19px] font-semibold text-white">Не удалось подключиться</div>
+      <div className="text-[19px] font-semibold text-white">{t('app.connectFail')}</div>
       <div className="text-[15px] text-[#8E8E93]">{message}</div>
       <button
         onClick={onRetry}
         className="mt-2 px-8 py-3 btn-primary rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
       >
-        Повторить
+        {t('common.retry')}
       </button>
     </div>
   );
@@ -60,14 +64,10 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
           <ShieldCheck className="w-10 h-10 text-[#4DA6FF]" />
         </div>
         <h1 className="text-[30px] font-bold tracking-tight text-white">
-          Добро пожаловать <br /> в Gigabyte
+          {t('terms.welcome')} <br /> Gigabyte
         </h1>
-        <div className="text-[15px] text-[#8E8E93] leading-relaxed max-w-[300px]">
-          ⚡ Высокая скорость соединения
-          <br />
-          🔐 Защищённое шифрованное подключение
-          <br />
-          📶 Безопасность в публичных сетях Wi-Fi
+        <div className="text-[15px] text-[#8E8E93] leading-relaxed max-w-[300px] whitespace-pre-line">
+          {t('terms.features')}
         </div>
       </div>
 
@@ -79,7 +79,7 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
           className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
         >
           <FileText className="w-5 h-5 text-[#0A84FF] shrink-0" />
-          <span className="text-[16px] text-white font-medium">Публичная оферта</span>
+          <span className="text-[16px] text-white font-medium">{t('terms.offer')}</span>
         </a>
         <a
           href={boot.privacy_url}
@@ -88,17 +88,17 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
           className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
         >
           <Lock className="w-5 h-5 text-[#0A84FF] shrink-0" />
-          <span className="text-[16px] text-white font-medium">Политика конфиденциальности</span>
+          <span className="text-[16px] text-white font-medium">{t('terms.privacy')}</span>
         </a>
         <button
           onClick={accept}
           disabled={busy}
           className="w-full py-4 btn-primary rounded-3xl text-white font-bold text-[17px] active:scale-[0.98] transition-transform disabled:opacity-60 mt-2"
         >
-          {busy ? 'Секунду…' : '✅ Принять и продолжить'}
+          {busy ? t('common.wait') : t('terms.accept')}
         </button>
         <div className="text-[12px] text-[#8E8E93]/70 text-center px-6">
-          Нажимая «Принять», вы соглашаетесь с условиями публичной оферты и политикой конфиденциальности.
+          {t('terms.note')}
         </div>
       </div>
     </div>
@@ -106,10 +106,10 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
 }
 
 const USER_TABS: NavTab[] = [
-  { path: '/', icon: User, label: 'Дашборд' },
-  { path: '/buy', icon: ShoppingBag, label: 'Купить' },
-  { path: '/instructions', icon: BookOpen, label: 'Гайды' },
-  { path: '/support', icon: LifeBuoy, label: 'Помощь' },
+  { path: '/', icon: User, label: t('nav.dashboard') },
+  { path: '/buy', icon: ShoppingBag, label: t('nav.buy') },
+  { path: '/instructions', icon: BookOpen, label: t('nav.guides') },
+  { path: '/support', icon: LifeBuoy, label: t('nav.support') },
 ];
 
 export default function App() {
@@ -125,9 +125,9 @@ export default function App() {
       setBoot(data);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 401) {
-        setError('Откройте приложение из Telegram — авторизация выполняется автоматически.');
+        setError(t('app.openFromTg'));
       } else {
-        setError(e.message || 'Неизвестная ошибка');
+        setError(e.message || t('common.error'));
       }
     } finally {
       setLoading(false);
@@ -169,10 +169,14 @@ export default function App() {
           }}
         >
           {boot.is_admin ? (
-            // Администратор видит ТОЛЬКО админ-приложение
-            <AdminApp />
+            // Администратор видит ТОЛЬКО админ-приложение (ленивый чанк)
+            <Suspense fallback={<Spinner />}>
+              <AdminApp />
+            </Suspense>
           ) : (
-            <>
+            // Ограничение ширины: на планшетах и десктопах контент не
+            // растягивается на весь экран, на телефонах ничего не меняется.
+            <div className="mx-auto w-full max-w-[560px]">
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/buy" element={<Buy />} />
@@ -181,7 +185,7 @@ export default function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
               <BottomNav tabs={USER_TABS} />
-            </>
+            </div>
           )}
         </div>
       </HashRouter>

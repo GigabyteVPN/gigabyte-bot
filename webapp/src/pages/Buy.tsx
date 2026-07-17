@@ -4,6 +4,7 @@ import { api, CryptoOrder, Tariff, ServerInfo, HashResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback, openInvoice } from '../lib/telegram';
 import { cn } from '../lib/utils';
+import { t } from '../lib/i18n';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -217,7 +218,7 @@ export default function Buy() {
           <ChevronLeft className="w-6 h-6 text-white" />
         </button>
       )}
-      <h1 className="text-[26px] font-bold tracking-tight">{title}</h1>
+      <h1 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold">{title}</h1>
     </header>
   );
 
@@ -232,10 +233,9 @@ export default function Buy() {
           <div className="text-[24px] font-bold text-white px-4">{successText}</div>
           {successLink && (
             <div className="w-full mt-2">
-              <CopyRow label="Ваша ссылка-подписка" value={successLink} />
+              <CopyRow label={t('buy.successLink')} value={successLink} />
               <div className="text-[13px] text-[#8E8E93] mt-3 px-2">
-                Скопируйте ссылку и импортируйте в приложение (v2rayTun, Streisand). Пошаговые инструкции — во вкладке
-                «Гайды».
+                {t('buy.successHint')}
               </div>
             </div>
           )}
@@ -244,13 +244,13 @@ export default function Buy() {
               onClick={() => navigate('/')}
               className="w-full py-4 btn-primary rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
             >
-              Перейти в Дашборд
+              {t('buy.toDash')}
             </button>
             <button
               onClick={() => navigate('/instructions')}
               className="w-full py-4 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
             >
-              📱 Как подключиться
+              {t('buy.howConnect')}
             </button>
           </div>
         </div>
@@ -263,7 +263,7 @@ export default function Buy() {
       {/* ================== СТАРТ ================== */}
       {step === 'start' && (
         <>
-          <Header title="Оформление" />
+          <Header title={t('buy.checkout')} />
 
           <button
             onClick={() => {
@@ -273,13 +273,13 @@ export default function Buy() {
             className="ios-list bg-gradient-to-br from-[#0A84FF]/30 via-[#5E5CE6]/15 to-transparent border border-[#0A84FF]/30 shadow-[0_12px_48px_rgba(10,132,255,0.2)] p-5 text-left relative overflow-hidden active:scale-[0.99] transition-transform"
           >
             <div className="absolute top-0 right-0 w-40 h-40 bg-[#0A84FF]/15 blur-3xl rounded-full pointer-events-none" />
-            <div className="text-[22px] font-bold text-white mb-1">🛒 Купить подписку</div>
+            <div className="text-[22px] font-bold text-white mb-1">{t('buy.buyCard')}</div>
             <div className="text-[14px] text-[#8E8E93]">
-              {boot.tariffs.length > 0 && `от ${Math.min(...boot.tariffs.map((t) => t.rub))} ₽ · `}
-              Telegram Stars или криптовалюта
+              {boot.tariffs.length > 0 && `${t('buy.from')} ${Math.min(...boot.tariffs.map((tf) => tf.rub))} ₽ · `}
+              {t('buy.starsOrCrypto')}
             </div>
             <div className="flex items-center gap-1 text-[#0A84FF] text-[15px] font-semibold mt-3">
-              Выбрать страну <ChevronRight className="w-4 h-4" />
+              {t('buy.chooseCountry')} <ChevronRight className="w-4 h-4" />
             </div>
           </button>
 
@@ -296,8 +296,8 @@ export default function Buy() {
                   <Gift className="w-6 h-6 text-yellow-400" />
                 </div>
                 <div className="flex-1">
-                  <div className="text-[18px] font-bold text-white">Пробная неделя</div>
-                  <div className="text-[14px] text-[#8E8E93]">7 дней бесплатно, без оплаты</div>
+                  <div className="text-[18px] font-bold text-white">{t('buy.trial')}</div>
+                  <div className="text-[14px] text-[#8E8E93]">{t('buy.trialHint')}</div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
               </div>
@@ -316,8 +316,8 @@ export default function Buy() {
                 <KeyRound className="w-6 h-6 text-[#BF5AF2]" />
               </div>
               <div className="flex-1">
-                <div className="text-[18px] font-bold text-white">Активировать ключ</div>
-                <div className="text-[14px] text-[#8E8E93]">Промокод формата GIFT-…</div>
+                <div className="text-[18px] font-bold text-white">{t('buy.promoCard')}</div>
+                <div className="text-[14px] text-[#8E8E93]">{t('buy.promoCardHint')}</div>
               </div>
               <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
             </div>
@@ -334,8 +334,8 @@ export default function Buy() {
                 <Star className="w-6 h-6 text-[#0A84FF]" />
               </div>
               <div className="flex-1">
-                <div className="text-[18px] font-bold text-white">Купить звёзды</div>
-                <div className="text-[14px] text-[#8E8E93]">Пополнить Stars у @PremiumBot</div>
+                <div className="text-[18px] font-bold text-white">{t('buy.buyStars')}</div>
+                <div className="text-[14px] text-[#8E8E93]">{t('buy.buyStarsHint')}</div>
               </div>
               <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
             </div>
@@ -346,10 +346,10 @@ export default function Buy() {
       {/* ================== ВЫБОР СЕРВЕРА ================== */}
       {step === 'server' && (
         <>
-          <Header title="Выберите страну" />
+          <Header title={t('buy.chooseCountryTitle')} />
           <div className="ios-list overflow-hidden">
             {activeServers.length === 0 && (
-              <div className="p-6 text-center text-[#8E8E93] text-[15px]">Нет доступных серверов</div>
+              <div className="p-6 text-center text-[#8E8E93] text-[15px]">{t('buy.noServers')}</div>
             )}
             {activeServers.map((s) => (
               <button
@@ -374,30 +374,30 @@ export default function Buy() {
       {/* ================== ВЫБОР ТАРИФА ================== */}
       {step === 'tariff' && (
         <>
-          <Header title={isExtend ? 'Продление' : 'Срок подписки'} />
+          <Header title={isExtend ? t('buy.extendTitle') : t('buy.termTitle')} />
           {isExtend && (
             <div className="text-[14px] text-[#8E8E93] -mt-2 ml-1">
-              Продление подписки <span className="font-mono text-white/70">{extendSubId}</span>
+              {t('buy.extending')} <span className="font-mono text-white/70">{extendSubId}</span>
             </div>
           )}
           <div className="flex flex-col gap-3">
-            {boot.tariffs.map((t) => (
+            {boot.tariffs.map((tf) => (
               <button
-                key={t.months}
+                key={tf.months}
                 onClick={() => {
                   hapticFeedback.selectionChanged();
-                  setTariff(t);
+                  setTariff(tf);
                   setStep('method');
                 }}
                 className="ios-list p-5 flex items-center justify-between active:scale-[0.99] transition-transform"
               >
                 <div className="text-left">
-                  <div className="text-[19px] font-bold text-white">{t.label}</div>
+                  <div className="text-[19px] font-bold text-white">{tf.label}</div>
                   <div className="text-[13px] text-[#8E8E93] mt-0.5">
-                    ⭐ {t.stars} Stars · ≈ ${t.usd}
+                    ⭐ {tf.stars} Stars · ≈ ${tf.usd}
                   </div>
                 </div>
-                <div className="text-[22px] font-bold text-[#0A84FF]">{t.rub} ₽</div>
+                <div className="text-[22px] font-bold text-[#0A84FF]">{tf.rub} ₽</div>
               </button>
             ))}
           </div>
@@ -407,11 +407,11 @@ export default function Buy() {
       {/* ================== СПОСОБ ОПЛАТЫ ================== */}
       {step === 'method' && tariff && (
         <>
-          <Header title="Способ оплаты" />
+          <Header title={t('buy.methodTitle')} />
           <div className="ios-list p-4 mb-1">
             <div className="flex justify-between items-center">
               <span className="text-[15px] text-[#8E8E93]">
-                {isExtend ? 'Продление' : server ? `${server.flag ?? ''} ${server.name}` : ''} · {tariff.label}
+                {isExtend ? t('buy.extendTitle') : server ? `${server.flag ?? ''} ${server.name}` : ''} · {tariff.label}
               </span>
               <span className="text-[17px] font-bold text-white">{tariff.rub} ₽</span>
             </div>
@@ -426,7 +426,7 @@ export default function Buy() {
             </div>
             <div className="flex-1 text-left">
               <div className="text-[18px] font-bold text-white">Telegram Stars</div>
-              <div className="text-[14px] text-[#8E8E93]">{tariff.stars} ⭐ · оплата в один клик</div>
+              <div className="text-[14px] text-[#8E8E93]">{tariff.stars} ⭐ · {t('buy.oneClick')}</div>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
           </button>
@@ -441,7 +441,7 @@ export default function Buy() {
               <Bitcoin className="w-6 h-6 text-[#32D74B]" />
             </div>
             <div className="flex-1 text-left">
-              <div className="text-[18px] font-bold text-white">Криптовалюта</div>
+              <div className="text-[18px] font-bold text-white">{t('buy.cryptoTitle')}</div>
               <div className="text-[14px] text-[#8E8E93]">USDT / USDC · сеть Arbitrum One</div>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
@@ -452,8 +452,8 @@ export default function Buy() {
       {/* ================== ВЫБОР КРИПТОВАЛЮТЫ ================== */}
       {step === 'crypto_currency' && tariff && (
         <>
-          <Header title="Криптовалюта" />
-          <div className="text-[14px] text-[#8E8E93] -mt-2 ml-1 mb-1">Сеть: Arbitrum One</div>
+          <Header title={t('buy.cryptoTitle')} />
+          <div className="text-[14px] text-[#8E8E93] -mt-2 ml-1 mb-1">{t('buy.network')}</div>
           {(['USDT', 'USDC'] as const).map((c) => (
             <button
               key={c}
@@ -488,7 +488,7 @@ export default function Buy() {
       {/* ================== ОПЛАТА КРИПТОЙ ================== */}
       {step === 'crypto_pay' && order && (
         <>
-          <Header title={`Оплата ${order.currency}`} />
+          <Header title={`${t('buy.payTitle')} ${order.currency}`} />
           <div className="flex flex-col items-center gap-4">
             <div className="bg-white p-4 rounded-[24px]">
               <QRCodeSVG value={order.wallet} size={180} level="M" />
@@ -502,14 +502,13 @@ export default function Buy() {
           </div>
 
           <div className="flex flex-col gap-3">
-            <CopyRow label="Кошелёк для перевода" value={order.wallet} />
-            <CopyRow label={`Сумма (${order.currency})`} value={order.amount_usd.toFixed(2)} />
-            <CopyRow label="Контракт токена" value={order.contract} />
+            <CopyRow label={t('buy.wallet')} value={order.wallet} />
+            <CopyRow label={`${t('buy.amount')} (${order.currency})`} value={order.amount_usd.toFixed(2)} />
+            <CopyRow label={t('buy.contract')} value={order.contract} />
           </div>
 
           <div className="bg-[#FF9500]/10 border border-[#FF9500]/25 rounded-2xl p-4 text-[13px] text-[#FF9500] leading-snug">
-            ⚠️ Отправьте точную сумму в сети Arbitrum One. После перевода вставьте TXID (хеш транзакции) ниже —
-            проверка автоматическая.
+            {t('buy.exactWarn')}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -526,16 +525,16 @@ export default function Buy() {
             >
               {verifying ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" /> Проверяем в блокчейне…
+                  <Loader2 className="w-5 h-5 animate-spin" /> {t('buy.checking')}
                 </>
               ) : (
                 <>
-                  <Send className="w-5 h-5" /> Я оплатил — проверить
+                  <Send className="w-5 h-5" /> {t('buy.paidCheck')}
                 </>
               )}
             </button>
             <div className="text-[12px] text-[#8E8E93] text-center px-4">
-              Заказ сохранён: вы можете вернуться и отправить TXID позже из «Ожидающих платежей» на Дашборде.
+              {t('buy.orderSaved')}
             </div>
           </div>
         </>
@@ -544,13 +543,13 @@ export default function Buy() {
       {/* ================== АКТИВАЦИЯ КЛЮЧА (страница) ================== */}
       {step === 'promo' && (
         <>
-          <Header title="Активация ключа" />
+          <Header title={t('buy.promoTitle')} />
           <div className="flex flex-col items-center text-center gap-4 pt-4 pb-2">
             <div className="w-20 h-20 app-icon rounded-[28px] bg-gradient-to-b from-[#D07BFF]/45 to-[#A845E8]/15 flex items-center justify-center shadow-[0_8px_40px_rgba(191,90,242,0.3)]">
               <KeyRound className="w-10 h-10 text-[#D07BFF]" />
             </div>
             <div className="text-[15px] text-[#8E8E93] max-w-[300px]">
-              Введите промокод, полученный у администратора или в рамках акции — подписка активируется мгновенно.
+              {t('buy.promoDesc')}
             </div>
           </div>
           <input
@@ -566,10 +565,10 @@ export default function Buy() {
             className="w-full py-4 rounded-full text-white font-bold text-[16px] bg-gradient-to-b from-[#D07BFF] to-[#A845E8] shadow-[0_10px_24px_rgba(191,90,242,0.35)] border border-white/15 active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
-            Активировать ключ
+            {t('buy.promoBtn')}
           </button>
           <div className="text-[12px] text-[#8E8E93]/70 text-center px-8">
-            Формат ключа: GIFT- и 16 символов. Ключ одноразовый и привязывается к вашему аккаунту.
+            {t('buy.promoFormat')}
           </div>
         </>
       )}
@@ -592,8 +591,8 @@ export default function Buy() {
               className="w-full max-w-[440px] glass-sheet rounded-t-[36px] sm:rounded-[32px] p-6 pb-10 border-t border-white/10 max-h-[75vh] overflow-y-auto hidden-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-[20px] font-bold text-white mb-1">🎁 Пробная неделя</h3>
-              <p className="text-[14px] text-[#8E8E93] mb-4">Выберите страну — доступ на 7 дней бесплатно.</p>
+              <h3 className="text-[20px] font-bold text-white mb-1">{t('buy.trialModalTitle')}</h3>
+              <p className="text-[14px] text-[#8E8E93] mb-4">{t('buy.trialModalHint')}</p>
               <div className="flex flex-col gap-2">
                 {activeServers.map((s) => (
                   <button

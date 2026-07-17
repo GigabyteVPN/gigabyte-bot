@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, apiBase, Subscription, Payment, HashResult } from '../lib/api';
+import { api, apiBase, Subscription, Payment, HashResult, ReferralSummary } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback, openInvoice, downloadFile } from '../lib/telegram';
+import { t, locale } from '../lib/i18n';
+import { SectionTitle } from '../components/SectionTitle';
 import {
   Copy,
   RefreshCw,
@@ -17,7 +19,8 @@ import {
   History,
   Zap,
   QrCode,
-  BellPlus,
+  BellRing,
+  BellOff,
   Wallet2,
   ChevronLeft,
   Star,
@@ -25,6 +28,11 @@ import {
   Send,
   Lock,
   AlertTriangle,
+  Gift,
+  Users2,
+  Share2,
+  Download,
+  Sparkles,
 } from 'lucide-react';
 import { cn, formatBytes } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -49,7 +57,7 @@ const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
     return () => clearInterval(timer);
   }, [expiryMs]);
 
-  if (expiryMs === 0) return <div className="text-[16px] font-semibold text-[#32D74B]">Бессрочно ∞</div>;
+  if (expiryMs === 0) return <div className="text-[16px] font-semibold text-[#32D74B]">{t('dash.unlimited')}</div>;
   if (!timeLeft) return <div className="text-[15px] font-semibold text-white">0d 0h 0m 0s</div>;
 
   return (
@@ -88,7 +96,7 @@ const SubTraffic = ({ subId }: { subId: string }) => {
     <div className="flex flex-col items-end">
       <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
         {data.online && <span className="w-1.5 h-1.5 rounded-full bg-[#32D74B] shadow-[0_0_6px_rgba(50,215,75,0.9)]" />}
-        {data.online ? 'Онлайн' : 'Трафик'}
+        {data.online ? t('dash.online') : t('dash.traffic')}
       </span>
       <span className="text-[16px] font-semibold text-white font-mono">{formatBytes(total)}</span>
     </div>
@@ -172,7 +180,7 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
             <div className="space-y-2.5 text-[10px] flex-1">
               <ReceiptRow
                 k="Дата и время"
-                v={payment.created_at ? new Date(payment.created_at).toLocaleString('ru-RU') : '—'}
+                v={payment.created_at ? new Date(payment.created_at).toLocaleString(locale) : '—'}
               />
               <ReceiptRow k="Терминал" v="TELEGRAM MINI APP" />
               <ReceiptRow k="Кассир" v="GIGABYTE BOT · АВТООПЛАТА" />
@@ -246,7 +254,7 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
                   <div className="text-[7.5px] font-bold tracking-[0.15em] uppercase font-serif my-0.5">APPROVED</div>
                   <div className="w-[80%] h-px bg-red-800/30 my-0.5" />
                   <div className="text-[7px] font-medium font-mono mt-1 opacity-90">
-                    {new Date(payment.created_at || new Date()).toLocaleDateString('ru-RU')}
+                    {new Date(payment.created_at || new Date()).toLocaleDateString(locale)}
                   </div>
                 </div>
               </motion.div>
@@ -258,7 +266,7 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
             <button
               onClick={onClose}
               className="w-[64px] h-[64px] glass rounded-full flex items-center justify-center text-white active:scale-90 transition-all"
-              aria-label="Закрыть чек"
+              aria-label={t('common.close')}
             >
               <X className="w-7 h-7" />
             </button>
@@ -269,7 +277,6 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
   );
 };
 
-// Модалка отправки TXID для крипто-платежа
 // Копируемая строка реквизитов
 const PayCopyRow = ({ label, value }: { label: string; value: string }) => {
   const [copied, setCopied] = useState(false);
@@ -326,7 +333,7 @@ const CryptoPayPage = ({
       onDone(result);
     } catch (e: any) {
       hapticFeedback.notificationOccurred('error');
-      tg.showAlert(e.message || 'Ошибка проверки');
+      tg.showAlert(e.message || t('common.error'));
       setBusy(false);
     }
   };
@@ -348,9 +355,11 @@ const CryptoPayPage = ({
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
           <div>
-            <h1 className="text-[24px] font-bold tracking-tight leading-tight">Оплата {currency}</h1>
+            <h1 className="text-[24px] font-bold tracking-tight leading-tight">
+              {t('dash.payCrypto')} {currency}
+            </h1>
             <div className="text-[13px] text-[#8E8E93]">
-              Заказ {payment.payment_uid || payment.id} · действует 24 часа
+              {payment.payment_uid || payment.id} · 24h
             </div>
           </div>
         </header>
@@ -364,7 +373,7 @@ const CryptoPayPage = ({
               {amount.toFixed(2)} {currency}
             </div>
             <div className="text-[13px] text-[#8E8E93] mt-1.5">
-              ≈ {Math.round(Number(payment.amount_rub || 0))} ₽ · сеть Arbitrum One
+              ≈ {Math.round(Number(payment.amount_rub || 0))} ₽ · Arbitrum One
             </div>
           </div>
         </div>
@@ -414,6 +423,292 @@ const CryptoPayPage = ({
   );
 };
 
+// ============================================================
+//  Реферальная программа — полноэкранная страница
+// ============================================================
+const RefStat = ({ value, label }: { value: number | string; label: string }) => (
+  <div className="flex-1 glass-inner rounded-3xl py-3.5 px-3 text-center">
+    <div className="text-[22px] font-bold text-white leading-none">{value}</div>
+    <div className="text-[11.5px] text-[#8E8E93] font-medium uppercase tracking-wider mt-1.5">{label}</div>
+  </div>
+);
+
+const reasonLabel = (reason: string) => {
+  if (reason === 'referral_signup') return t('ref.txSignup');
+  if (reason === 'referral_purchase') return t('ref.txPurchase');
+  if (reason === 'redeem') return t('ref.txRedeem');
+  return reason;
+};
+
+const ReferralPage = ({
+  subs,
+  onClose,
+  onRedeemed,
+}: {
+  subs: Subscription[];
+  onClose: () => void;
+  onRedeemed: () => void;
+}) => {
+  const [data, setData] = useState<ReferralSummary | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api.referral().then(setData).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const activeSub = subs.find((s) => s.status === 'active' && s.expiry_date !== 0);
+  const canRedeem = data ? data.points >= data.redeem_cost : false;
+
+  const copyLink = () => {
+    if (!data) return;
+    navigator.clipboard.writeText(data.link);
+    hapticFeedback.selectionChanged();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  const share = () => {
+    if (!data) return;
+    hapticFeedback.impactOccurred('light');
+    const url = `https://t.me/share/url?url=${encodeURIComponent(data.link)}&text=${encodeURIComponent(t('ref.shareText'))}`;
+    try {
+      tg.openTelegramLink(url);
+    } catch {
+      window.open(url, '_blank');
+    }
+  };
+
+  const redeem = async () => {
+    if (!data || !canRedeem || busy) return;
+    setBusy(true);
+    try {
+      await api.referralRedeem(activeSub ? { sub_id: activeSub.sub_id } : {});
+      hapticFeedback.notificationOccurred('success');
+      tg.showAlert(t('ref.redeemedOk'));
+      load();
+      onRedeemed();
+    } catch (e: any) {
+      hapticFeedback.notificationOccurred('error');
+      tg.showAlert(e.message || t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 60 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 60 }}
+      transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+      className="fixed inset-0 z-[150] flex flex-col bg-[#050507]"
+    >
+      <div
+        className="shrink-0 flex items-center gap-3 px-4 pb-3"
+        style={{
+          paddingTop:
+            'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 6px), 14px)',
+        }}
+      >
+        <button
+          onClick={onClose}
+          className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+        >
+          <ChevronLeft className="w-6 h-6 text-white" />
+        </button>
+        <SectionTitle className="mb-0 ml-0">{t('ref.title')}</SectionTitle>
+      </div>
+
+      <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-2 pb-12 flex flex-col gap-5">
+        {!data ? (
+          <div className="flex justify-center py-16">
+            <div className="animate-spin w-7 h-7 border-2 border-white/20 border-t-white rounded-full" />
+          </div>
+        ) : (
+          <>
+            {/* Баланс */}
+            <div className="ios-list p-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-40 h-40 bg-[#BF5AF2]/15 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
+              <div className="relative z-10 flex items-center gap-4">
+                <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
+                  <Gift className="w-7 h-7 text-[#D7A8FF]" />
+                </div>
+                <div>
+                  <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
+                    {t('ref.balance')}
+                  </div>
+                  <div className="text-[34px] font-bold text-white leading-none mt-1">
+                    {data.points}
+                    <span className="text-[15px] text-[#8E8E93] font-medium ml-2">{t('ref.points')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Как это работает */}
+            <section>
+              <SectionTitle>{t('ref.how')}</SectionTitle>
+              <div className="ios-list p-5 flex flex-col gap-3.5">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 glass-inner rounded-full flex items-center justify-center shrink-0">
+                    <Users2 className="w-4.5 h-4.5 text-[#4DA6FF]" />
+                  </div>
+                  <span className="flex-1 text-[14.5px] text-white/90 leading-snug">{t('ref.rule1')}</span>
+                  <span className="text-[15px] font-bold text-[#32D74B] shrink-0">+{data.points_signup}</span>
+                </div>
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 glass-inner rounded-full flex items-center justify-center shrink-0">
+                    <CreditCard className="w-4.5 h-4.5 text-[#4DA6FF]" />
+                  </div>
+                  <span className="flex-1 text-[14.5px] text-white/90 leading-snug">{t('ref.rule2')}</span>
+                  <span className="text-[15px] font-bold text-[#32D74B] shrink-0">+{data.points_purchase}</span>
+                </div>
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 glass-inner rounded-full flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4.5 h-4.5 text-[#FFD60A]" />
+                  </div>
+                  <span className="flex-1 text-[14.5px] text-white/90 leading-snug">
+                    {data.redeem_cost} {t('ref.points')} = {data.redeem_months} {t('ref.rule3')}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {/* Ссылка */}
+            <section>
+              <SectionTitle>{t('ref.yourLink')}</SectionTitle>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={copyLink}
+                  className="bg-black/20 border border-white/[0.05] rounded-full p-3 pl-4 flex items-center gap-3 active:scale-[0.98] transition-transform relative overflow-hidden"
+                >
+                  <div
+                    className={cn(
+                      'flex-1 truncate font-mono text-[13.5px] text-[#0A84FF] opacity-90 text-left transition-all',
+                      copied && 'opacity-0 translate-y-2',
+                    )}
+                  >
+                    {data.link}
+                  </div>
+                  <div
+                    className={cn(
+                      'absolute inset-0 flex items-center justify-center text-[14px] text-[#32D74B] font-bold tracking-tight opacity-0 transition-all duration-300',
+                      copied && 'opacity-100',
+                    )}
+                  >
+                    {t('dash.copiedBig')}
+                  </div>
+                  <div className="w-9 h-9 rounded-full bg-[#0A84FF]/10 flex items-center justify-center shrink-0 relative z-10">
+                    {copied ? <Check className="w-5 h-5 text-[#32D74B]" /> : <Copy className="w-4 h-4 text-[#0A84FF]" />}
+                  </div>
+                </button>
+                <button
+                  onClick={share}
+                  className="w-full py-3.5 btn-primary rounded-full text-white font-bold text-[16px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+                >
+                  <Share2 className="w-5 h-5" /> {t('ref.share')}
+                </button>
+              </div>
+            </section>
+
+            {/* Статистика */}
+            <div className="flex gap-3">
+              <RefStat value={data.invited_total} label={t('ref.invited')} />
+              <RefStat value={data.invited_paid} label={t('ref.paidFriends')} />
+            </div>
+
+            {/* Обмен баллов */}
+            <section>
+              <div className="ios-list p-5 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-[16px] font-bold text-white">{t('ref.redeem')}</div>
+                  <div className="text-[14px] font-semibold text-[#8E8E93]">
+                    {data.redeem_cost} {t('ref.points')}
+                  </div>
+                </div>
+                <div className="text-[13px] text-[#8E8E93] leading-snug">
+                  {activeSub
+                    ? `${t('ref.redeemExtend')}: ${activeSub.server.flag ?? ''} ${activeSub.server.name} · +${data.redeem_months} мес`
+                    : t('ref.redeemNew')}
+                </div>
+                <button
+                  onClick={redeem}
+                  disabled={!canRedeem || busy}
+                  className={cn(
+                    'w-full py-3.5 rounded-full font-bold text-[16px] active:scale-[0.98] transition-all flex items-center justify-center gap-2',
+                    canRedeem ? 'btn-primary text-white' : 'bg-white/[0.06] text-white/40',
+                  )}
+                >
+                  {busy ? (
+                    <div className="animate-spin w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
+                  ) : canRedeem ? (
+                    <>
+                      <Sparkles className="w-5 h-5" /> {t('ref.redeem')}
+                    </>
+                  ) : (
+                    `${t('ref.notEnough')} · ${data.points}/${data.redeem_cost}`
+                  )}
+                </button>
+              </div>
+            </section>
+
+            {/* История начислений */}
+            <section>
+              <SectionTitle>{t('ref.historyTitle')}</SectionTitle>
+              {data.history.length === 0 ? (
+                <div className="ios-list p-6 text-center text-[14px] text-[#8E8E93]">{t('ref.historyEmpty')}</div>
+              ) : (
+                <div className="ios-list">
+                  {data.history.map((h, i) => (
+                    <div key={i} className="ios-list-item">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[15px] font-medium text-white">{reasonLabel(h.reason)}</span>
+                        <span className="text-[12.5px] text-[#8E8E93]">
+                          {new Date(h.created_at).toLocaleString(locale, {
+                            day: 'numeric',
+                            month: 'long',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <span
+                        className={cn(
+                          'text-[16px] font-bold font-mono',
+                          h.delta > 0 ? 'text-[#32D74B]' : 'text-[#FF9F0A]',
+                        )}
+                      >
+                        {h.delta > 0 ? `+${h.delta}` : h.delta}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+};
+
+// ============================================================
+//  История транзакций — статусы, фильтры, итоги
+// ============================================================
+type HistFilter = 'all' | 'paid' | 'free' | 'cancelled';
+
+const statusMeta = (p: Payment): { label: string; cls: string } => {
+  const s = p.status || 'completed';
+  if (s === 'completed') return { label: t('hist.stDone'), cls: 'bg-[#32D74B]/15 text-[#32D74B]' };
+  if (s === 'expired') return { label: t('hist.stExpired'), cls: 'bg-[#FF453A]/15 text-[#FF6961]' };
+  return { label: t('hist.stProcessing'), cls: 'bg-[#FF9F0A]/15 text-[#FF9F0A]' };
+};
+
 export default function Dashboard() {
   const { boot } = useApp();
   const navigate = useNavigate();
@@ -422,11 +717,15 @@ export default function Dashboard() {
   const [history, setHistory] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [activeModal, setActiveModal] = useState<'history' | null>(null);
+  const [activeModal, setActiveModal] = useState<'history' | 'referral' | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<Payment | null>(null);
   const [hashPayment, setHashPayment] = useState<Payment | null>(null);
   const [qrSub, setQrSub] = useState<Subscription | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [remindersOn, setRemindersOn] = useState(boot.reminders_enabled !== false);
+  const [remindersBusy, setRemindersBusy] = useState(false);
+  const [qrShareBusy, setQrShareBusy] = useState(false);
+  const [histFilter, setHistFilter] = useState<HistFilter>('all');
 
   const fetchData = useCallback(async () => {
     try {
@@ -459,14 +758,30 @@ export default function Dashboard() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Добавляет напоминание об истечении подписки в системный календарь
-  // устройства (iPhone/Android/ПК): скачивается .ics-файл с событием и
-  // двумя будильниками — за 24 часа и за 1 час до отключения.
-  const addDeviceReminder = (sub: Subscription) => {
-    if (!sub.ics_url) return;
+  // Колокольчик: вкл/выкл напоминаний от бота (за 24 ч и за 1 ч до отключения)
+  const toggleReminders = async () => {
+    if (remindersBusy) return;
+    setRemindersBusy(true);
+    const next = !remindersOn;
+    try {
+      await api.setReminders(next);
+      setRemindersOn(next);
+      hapticFeedback.notificationOccurred('success');
+      tg.showAlert(next ? t('dash.remindOn') : t('dash.remindOff'));
+    } catch (e: any) {
+      hapticFeedback.notificationOccurred('error');
+      tg.showAlert(e.message || t('common.error'));
+    } finally {
+      setRemindersBusy(false);
+    }
+  };
+
+  // Скачивание QR-кода подписки как PNG-картинки
+  const downloadQr = (sub: Subscription) => {
+    if (!sub.qr_url) return;
     hapticFeedback.impactOccurred('light');
-    const url = `${apiBase || window.location.origin}${sub.ics_url}`;
-    const started = downloadFile(url, 'gigabyte-reminder.ics');
+    const url = `${apiBase || window.location.origin}${sub.qr_url}`;
+    const started = downloadFile(url, 'gigabyte-vpn-qr.png');
     if (!started) {
       try {
         tg.openLink(url);
@@ -474,9 +789,22 @@ export default function Dashboard() {
         window.open(url, '_blank');
       }
     }
-    tg.showAlert(
-      '🔔 Скачивается файл напоминания.\n\nОткройте его — событие добавится в календарь устройства с уведомлениями за 24 часа и за 1 час до отключения подписки.',
-    );
+  };
+
+  // Отправка QR в чат с ботом — оттуда можно переслать или сохранить
+  const shareQr = async (sub: Subscription) => {
+    if (qrShareBusy) return;
+    setQrShareBusy(true);
+    try {
+      await api.shareSubQr(sub.sub_id);
+      hapticFeedback.notificationOccurred('success');
+      tg.showAlert(t('dash.qrSent'));
+    } catch (e: any) {
+      hapticFeedback.notificationOccurred('error');
+      tg.showAlert(e.message || t('common.error'));
+    } finally {
+      setQrShareBusy(false);
+    }
   };
 
   const payStars = async (p: Payment) => {
@@ -486,11 +814,11 @@ export default function Dashboard() {
       const status = await openInvoice(invoice_link);
       if (status === 'paid') {
         hapticFeedback.notificationOccurred('success');
-        tg.showAlert('✅ Оплата прошла! Подписка выдана — детали придут в чат с ботом.');
+        tg.showAlert(t('dash.starsPaid'));
         setTimeout(fetchData, 1500);
       }
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
     }
   };
 
@@ -500,7 +828,7 @@ export default function Dashboard() {
       hapticFeedback.notificationOccurred('success');
       fetchData();
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
     }
   };
 
@@ -524,20 +852,43 @@ export default function Dashboard() {
     try {
       await api.deleteAccount();
       setConfirmDelete(false);
-      tg.showAlert('✅ Ваш аккаунт и все данные удалены. До свидания!');
+      tg.showAlert(t('dash.deleted'));
       setTimeout(() => tg.close?.(), 1200);
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
     }
   };
+
+  // История с учётом выбранного фильтра + итоговые суммы
+  const filteredHistory = useMemo(() => {
+    return history.filter((p) => {
+      if (histFilter === 'paid') return !isFree(p) && p.status === 'completed';
+      if (histFilter === 'free') return isFree(p) && p.status === 'completed';
+      if (histFilter === 'cancelled') return p.status !== 'completed';
+      return true;
+    });
+  }, [history, histFilter]);
+
+  const totalPaid = useMemo(
+    () =>
+      history
+        .filter((p) => p.status === 'completed' && !isFree(p))
+        .reduce((sum, p) => sum + Number(p.amount_rub || 0), 0),
+    [history],
+  );
+
+  const filters: { id: HistFilter; label: string }[] = [
+    { id: 'all', label: t('hist.all') },
+    { id: 'paid', label: t('hist.paid') },
+    { id: 'free', label: t('hist.free') },
+    { id: 'cancelled', label: t('hist.cancelled') },
+  ];
 
   return (
     <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-500 pb-8">
       {/* ---- Подписки ---- */}
       <section>
-        <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4 mt-2">
-          Мои подписки
-        </h2>
+        <SectionTitle className="mt-2">{t('dash.mySubs')}</SectionTitle>
         {loading ? (
           <div className="ios-list p-6 text-center text-[#8E8E93] flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
@@ -547,15 +898,13 @@ export default function Dashboard() {
             <div className="w-14 h-14 bg-[#2C2C2E] rounded-full flex items-center justify-center mx-auto mb-4 border border-white/[0.08]">
               <Clock className="w-7 h-7 text-[#8E8E93]" />
             </div>
-            <div className="text-[19px] font-semibold text-white mb-2">Нет подписок</div>
-            <div className="text-[15px] text-[#8E8E93] px-4 mb-5">
-              Оформите подписку — доступ появится мгновенно.
-            </div>
+            <div className="text-[19px] font-semibold text-white mb-2">{t('dash.noSubs')}</div>
+            <div className="text-[15px] text-[#8E8E93] px-4 mb-5">{t('dash.noSubsHint')}</div>
             <button
               onClick={() => navigate('/buy')}
               className="px-8 py-3 btn-primary rounded-full text-white font-semibold text-[16px] active:scale-95 transition-transform"
             >
-              🛒 Купить подписку
+              {t('dash.buySub')}
             </button>
           </div>
         ) : (
@@ -563,10 +912,7 @@ export default function Dashboard() {
             {subs.map((sub) => {
               const isActive = sub.status === 'active';
               return (
-                <div
-                  key={sub.id}
-                  className="ios-list overflow-hidden relative group"
-                >
+                <div key={sub.id} className="ios-list overflow-hidden relative group">
                   <div className="p-5 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#0A84FF]/10 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
                     <div className="relative z-10 flex flex-col gap-3">
@@ -579,7 +925,9 @@ export default function Dashboard() {
                             <div
                               className={cn(
                                 'w-2.5 h-2.5 rounded-full',
-                                isActive ? 'bg-[#32D74B] shadow-[0_0_12px_rgba(50,215,75,0.8)]' : 'bg-[#FF453A]',
+                                isActive
+                                  ? 'bg-[#32D74B] shadow-[0_0_12px_rgba(50,215,75,0.8)] dot-pulse'
+                                  : 'bg-[#FF453A]',
                               )}
                             />
                             <div
@@ -588,21 +936,27 @@ export default function Dashboard() {
                                 isActive ? 'text-[#32D74B]' : 'text-[#FF453A]',
                               )}
                             >
-                              {isActive ? 'Защита активна' : 'Подписка истекла'}
+                              {isActive ? t('dash.active') : t('dash.expired')}
                             </div>
                           </div>
                         </div>
                         {isActive && (
                           <div className="flex gap-2">
-                            {sub.ics_url && (
-                              <button
-                                onClick={() => addDeviceReminder(sub)}
-                                className="w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                                aria-label="Напоминание на устройство"
-                              >
-                                <BellPlus className="w-5 h-5 text-[#FF9F0A]" />
-                              </button>
-                            )}
+                            <button
+                              onClick={toggleReminders}
+                              disabled={remindersBusy}
+                              className={cn(
+                                'w-10 h-10 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform',
+                                remindersBusy && 'opacity-50',
+                              )}
+                              aria-label="Reminders"
+                            >
+                              {remindersOn ? (
+                                <BellRing className="w-5 h-5 text-[#FF9F0A]" />
+                              ) : (
+                                <BellOff className="w-5 h-5 text-white/40" />
+                              )}
+                            </button>
                             {sub.sub_link && (
                               <button
                                 onClick={() => {
@@ -622,7 +976,7 @@ export default function Dashboard() {
                         <div className="flex items-end justify-between mt-3 gap-3">
                           <div className="flex flex-col">
                             <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5">
-                              Осталось времени
+                              {t('dash.timeLeft')}
                             </span>
                             <CountdownTimer expiryMs={sub.expiry_date} />
                           </div>
@@ -635,7 +989,7 @@ export default function Dashboard() {
                   {isActive && sub.sub_link ? (
                     <div className="p-4 flex flex-col gap-3">
                       <div className="flex flex-col gap-1.5">
-                        <span className="text-[13px] text-[#8E8E93] font-medium px-1">Ссылка-подписка</span>
+                        <span className="text-[13px] text-[#8E8E93] font-medium px-1">{t('dash.subLink')}</span>
                         <div
                           className="bg-black/20 border border-white/[0.05] rounded-full p-3 flex items-center gap-3 cursor-pointer group active:scale-[0.98] transition-transform pl-4 relative overflow-hidden"
                           onClick={() => handleCopy(sub.sub_link!, `sub${sub.id}`)}
@@ -654,7 +1008,7 @@ export default function Dashboard() {
                               copiedId === `sub${sub.id}` && 'opacity-100 translate-y-0',
                             )}
                           >
-                            СКОПИРОВАНО
+                            {t('dash.copiedBig')}
                           </div>
                           <div className="w-9 h-9 rounded-full bg-[#0A84FF]/10 flex items-center justify-center shrink-0 relative z-10">
                             {copiedId === `sub${sub.id}` ? (
@@ -672,7 +1026,7 @@ export default function Dashboard() {
                         }}
                         className="w-full py-3 bg-white/[0.06] rounded-full text-[#0A84FF] font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                       >
-                        <RefreshCw className="w-4 h-4" /> Продлить подписку
+                        <RefreshCw className="w-4 h-4" /> {t('dash.extend')}
                       </button>
                     </div>
                   ) : (
@@ -684,7 +1038,7 @@ export default function Dashboard() {
                       className="ios-list-item w-full bg-[#FF453A]/5 border-t border-white/5"
                     >
                       <span className="text-[15px] font-medium text-[#FF453A] w-full text-center">
-                        Подписка истекла — оформить новую
+                        {t('dash.expiredCta')}
                       </span>
                     </button>
                   )}
@@ -698,9 +1052,7 @@ export default function Dashboard() {
       {/* ---- Ожидающие платежи ---- */}
       {pending.length > 0 && (
         <section>
-          <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4">
-            Ожидающие платежи
-          </h2>
+          <SectionTitle>{t('dash.pending')}</SectionTitle>
           <div className="ios-list overflow-hidden">
             {pending.map((p, index) => (
               <div
@@ -716,15 +1068,15 @@ export default function Dashboard() {
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold text-white text-[17px] tracking-tight">
-                      {p.method === 'stars' ? 'Оплата Stars' : `Оплата ${p.currency || 'крипто'}`} · ₽
+                      {p.method === 'stars' ? t('dash.payStars') : `${t('dash.payCrypto')} ${p.currency || ''}`} · ₽
                       {p.amount_rub}
                     </div>
                     <div className="text-[14px] text-[#8E8E93] font-medium mt-0.5">
                       {p.status === 'awaiting_hash'
-                        ? 'Ожидает отправки TXID'
+                        ? t('dash.awaitTxid')
                         : p.status === 'pending_stars'
-                          ? 'Ожидает оплаты Stars'
-                          : 'Ожидает перевода и TXID'}
+                          ? t('dash.awaitStars')
+                          : t('dash.awaitTransfer')}
                     </div>
                   </div>
                   <button
@@ -739,7 +1091,7 @@ export default function Dashboard() {
                     onClick={() => payStars(p)}
                     className="w-full py-3 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                   >
-                    <Star className="w-4 h-4" /> Оплатить Stars
+                    <Star className="w-4 h-4" /> {t('dash.payStarsBtn')}
                   </button>
                 ) : (
                   <button
@@ -749,7 +1101,7 @@ export default function Dashboard() {
                     }}
                     className="w-full py-3 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
                   >
-                    <Wallet2 className="w-4 h-4" /> Реквизиты и оплата
+                    <Wallet2 className="w-4 h-4" /> {t('dash.payDetails')}
                   </button>
                 )}
               </div>
@@ -758,9 +1110,34 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* ---- История ---- */}
+      {/* ---- Рефералка + история ---- */}
       <section>
         <div className="ios-list overflow-hidden">
+          <button
+            onClick={() => {
+              hapticFeedback.selectionChanged();
+              setActiveModal('referral');
+            }}
+            className="ios-list-item w-full group hover:bg-[#2C2C2E] transition-colors"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-[42px] h-[42px] bg-[#BF5AF2]/20 rounded-full flex items-center justify-center border border-[#BF5AF2]/30 shadow-[0_4px_12px_rgba(191,90,242,0.15)]">
+                <Gift className="w-5 h-5 text-[#D7A8FF]" />
+              </div>
+              <div className="flex flex-col text-left">
+                <span className="font-semibold text-white text-[17px] tracking-tight">{t('ref.card')}</span>
+                <span className="text-[13px] text-[#8E8E93]">{t('ref.cardHint')}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {(boot.ref_points ?? 0) > 0 && (
+                <span className="px-2.5 py-1 rounded-full bg-[#BF5AF2]/15 text-[#D7A8FF] text-[13px] font-bold">
+                  {boot.ref_points}
+                </span>
+              )}
+              <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
+            </div>
+          </button>
           <button
             onClick={() => {
               hapticFeedback.selectionChanged();
@@ -772,7 +1149,7 @@ export default function Dashboard() {
               <div className="w-[42px] h-[42px] bg-[#32D74B]/20 rounded-full flex items-center justify-center border border-[#32D74B]/30 shadow-[0_4px_12px_rgba(50,215,75,0.15)]">
                 <CreditCard className="w-5 h-5 text-[#32D74B]" />
               </div>
-              <span className="font-semibold text-white text-[17px] tracking-tight">История платежей</span>
+              <span className="font-semibold text-white text-[17px] tracking-tight">{t('dash.history')}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
           </button>
@@ -781,19 +1158,19 @@ export default function Dashboard() {
 
       {/* ---- Документы и аккаунт ---- */}
       <section>
-        <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4">Аккаунт</h2>
+        <SectionTitle>{t('dash.account')}</SectionTitle>
         <div className="ios-list overflow-hidden">
           <a href={boot.offer_url} target="_blank" rel="noreferrer" className="ios-list-item w-full">
             <div className="flex items-center gap-4">
               <FileText className="w-5 h-5 text-[#0A84FF]" />
-              <span className="text-[16px] text-white font-medium">Публичная оферта</span>
+              <span className="text-[16px] text-white font-medium">{t('terms.offer')}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
           </a>
           <a href={boot.privacy_url} target="_blank" rel="noreferrer" className="ios-list-item w-full">
             <div className="flex items-center gap-4">
               <Lock className="w-5 h-5 text-[#0A84FF]" />
-              <span className="text-[16px] text-white font-medium">Политика конфиденциальности</span>
+              <span className="text-[16px] text-white font-medium">{t('terms.privacy')}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
           </a>
@@ -801,14 +1178,14 @@ export default function Dashboard() {
             <button onClick={() => setConfirmDelete(true)} className="ios-list-item w-full">
               <div className="flex items-center gap-4">
                 <Trash2 className="w-5 h-5 text-[#FF453A]" />
-                <span className="text-[16px] text-[#FF453A] font-medium">Удалить аккаунт и данные</span>
+                <span className="text-[16px] text-[#FF453A] font-medium">{t('dash.deleteAccount')}</span>
               </div>
             </button>
           )}
         </div>
       </section>
 
-      {/* ---- Модалка QR подписки ---- */}
+      {/* ---- Модалка QR подписки: показать, скачать, поделиться ---- */}
       <AnimatePresence>
         {qrSub && qrSub.sub_link && (
           <motion.div
@@ -822,12 +1199,35 @@ export default function Dashboard() {
               initial={{ scale: 0.85 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.85 }}
-              className="bg-white rounded-[32px] p-6 flex flex-col items-center gap-4"
+              className="flex flex-col items-center gap-4 w-full max-w-[340px]"
               onClick={(e) => e.stopPropagation()}
             >
-              <QRCodeSVG value={qrSub.sub_link} size={240} level="M" />
-              <div className="text-[13px] text-black/60 font-medium text-center">
-                Отсканируйте в приложении на другом устройстве
+              <div className="bg-white rounded-[32px] p-6 flex flex-col items-center gap-4 w-full">
+                <QRCodeSVG value={qrSub.sub_link} size={228} level="M" />
+                <div className="text-[13px] text-black/60 font-medium text-center">{t('dash.qrScan')}</div>
+              </div>
+              <div className="flex gap-3 w-full">
+                {qrSub.qr_url && (
+                  <button
+                    onClick={() => downloadQr(qrSub)}
+                    className="flex-1 py-3.5 btn-glass rounded-full text-white font-semibold text-[15px] active:scale-[0.97] transition-transform flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4.5 h-4.5" /> {t('dash.qrDownload')}
+                  </button>
+                )}
+                <button
+                  onClick={() => shareQr(qrSub)}
+                  disabled={qrShareBusy}
+                  className="flex-1 py-3.5 btn-primary rounded-full text-white font-semibold text-[15px] active:scale-[0.97] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {qrShareBusy ? (
+                    <div className="animate-spin w-4.5 h-4.5 border-2 border-white/30 border-t-white rounded-full" />
+                  ) : (
+                    <>
+                      <Share2 className="w-4.5 h-4.5" /> {t('dash.qrShare')}
+                    </>
+                  )}
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -855,24 +1255,21 @@ export default function Dashboard() {
                 <div className="w-14 h-14 bg-[#FF453A]/15 rounded-full flex items-center justify-center border border-[#FF453A]/30">
                   <AlertTriangle className="w-7 h-7 text-[#FF453A]" />
                 </div>
-                <div className="text-[19px] font-bold text-white">Удалить аккаунт?</div>
-                <div className="text-[14px] text-[#8E8E93] leading-snug">
-                  Безвозвратно удалятся все подписки (доступ прекратится), история платежей, тикеты и персональные
-                  данные. Это действие нельзя отменить.
-                </div>
+                <div className="text-[19px] font-bold text-white">{t('dash.deleteTitle')}</div>
+                <div className="text-[14px] text-[#8E8E93] leading-snug">{t('dash.deleteText')}</div>
               </div>
               <div className="flex flex-col gap-2.5">
                 <button
                   onClick={deleteAccount}
                   className="w-full py-3.5 btn-danger rounded-2xl text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
                 >
-                  Да, удалить навсегда
+                  {t('dash.deleteConfirm')}
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
                   className="w-full py-3.5 btn-glass rounded-2xl text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
                 >
-                  Отмена
+                  {t('common.cancel')}
                 </button>
               </div>
             </motion.div>
@@ -889,6 +1286,17 @@ export default function Dashboard() {
             contracts={boot.contracts}
             onClose={() => setHashPayment(null)}
             onDone={onHashDone}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ---- Реферальная программа ---- */}
+      <AnimatePresence>
+        {activeModal === 'referral' && (
+          <ReferralPage
+            subs={subs}
+            onClose={() => setActiveModal(null)}
+            onRedeemed={() => fetchData()}
           />
         )}
       </AnimatePresence>
@@ -920,29 +1328,65 @@ export default function Dashboard() {
                 <ChevronLeft className="w-6 h-6 text-white" />
               </button>
               <div>
-                <h3 className="text-[24px] font-bold tracking-tight text-white leading-tight">История транзакций</h3>
-                <div className="text-[13px] text-[#8E8E93]">{history.length} завершённых операций</div>
+                <SectionTitle className="mb-0 ml-0">{t('hist.title')}</SectionTitle>
+                <div className="text-[13px] text-[#8E8E93] mt-0.5">
+                  {history.length} {t('hist.opsTotal')}
+                </div>
               </div>
             </div>
 
-            <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-2 relative">
-                {history.length > 0 ? (
-                  <div className="flex flex-col gap-5 pb-10">
-                    {history.map((p) => (
+            {/* Итог + фильтры */}
+            <div className="shrink-0 px-4 pt-1 pb-3 flex flex-col gap-3">
+              <div className="ios-list px-5 py-4 flex items-center justify-between">
+                <span className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
+                  {t('hist.spentTotal')}
+                </span>
+                <span className="text-[22px] font-bold text-white font-mono">
+                  ₽{totalPaid.toLocaleString(locale)}
+                </span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto hidden-scrollbar -mx-4 px-4">
+                {filters.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => {
+                      hapticFeedback.selectionChanged();
+                      setHistFilter(f.id);
+                    }}
+                    className={cn(
+                      'px-4 py-2 rounded-full text-[13.5px] font-semibold whitespace-nowrap transition-all active:scale-95',
+                      histFilter === f.id ? 'btn-primary text-white' : 'glass-inner text-white/60',
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-1 relative">
+              {filteredHistory.length > 0 ? (
+                <div className="flex flex-col gap-4 pb-10">
+                  {filteredHistory.map((p) => {
+                    const meta = statusMeta(p);
+                    const done = p.status === 'completed';
+                    return (
                       <div
                         key={p.id}
-                        className="glass border border-white/[0.05] rounded-2xl overflow-hidden mb-4 shadow-sm"
+                        className="glass border border-white/[0.05] rounded-2xl overflow-hidden shadow-sm"
                       >
                         <div className="p-4 border-b border-white/[0.05] flex justify-between items-center bg-white/[0.02]">
                           <div className="flex items-center gap-3.5">
                             <div
                               className={cn(
                                 'w-11 h-11 rounded-full flex items-center justify-center shrink-0',
-                                isFree(p)
-                                  ? 'bg-yellow-500/20 text-yellow-400'
-                                  : p.method === 'stars'
-                                    ? 'bg-blue-500/20 text-blue-400'
-                                    : 'bg-[#32D74B]/20 text-[#32D74B]',
+                                !done
+                                  ? 'bg-white/[0.06] text-white/40'
+                                  : isFree(p)
+                                    ? 'bg-yellow-500/20 text-yellow-400'
+                                    : p.method === 'stars'
+                                      ? 'bg-blue-500/20 text-blue-400'
+                                      : 'bg-[#32D74B]/20 text-[#32D74B]',
                               )}
                             >
                               {isFree(p) ? (
@@ -956,14 +1400,14 @@ export default function Dashboard() {
                             <div className="flex flex-col gap-0.5">
                               <div className="font-semibold text-[17px] text-white tracking-tight leading-none">
                                 {isFree(p)
-                                  ? 'Пробный период'
+                                  ? t('hist.trial')
                                   : p.method === 'stars'
                                     ? 'Telegram Stars'
-                                    : p.currency || 'Крипто-платеж'}
+                                    : p.currency || t('hist.crypto')}
                               </div>
                               <div className="text-[13px] text-[#8E8E93] font-medium">
                                 {p.created_at
-                                  ? new Date(p.created_at).toLocaleString('ru-RU', {
+                                  ? new Date(p.created_at).toLocaleString(locale, {
                                       day: 'numeric',
                                       month: 'long',
                                       hour: '2-digit',
@@ -973,17 +1417,24 @@ export default function Dashboard() {
                               </div>
                             </div>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex flex-col items-end gap-1">
                             <div className="text-[17px] font-semibold text-white tracking-tight">
                               {isFree(p) ? '₽0' : `₽${p.amount_rub}`}
                             </div>
-                            <div className="text-[13px] text-[#32D74B] font-medium mt-0.5">Выполнено</div>
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider',
+                                meta.cls,
+                              )}
+                            >
+                              {meta.label}
+                            </span>
                           </div>
                         </div>
 
                         <div className="p-4 space-y-3.5">
                           <div className="flex justify-between items-center">
-                            <span className="text-[14px] text-[#8E8E93]">Способ оплаты</span>
+                            <span className="text-[14px] text-[#8E8E93]">{t('hist.method')}</span>
                             <span className="text-[14px] text-white font-medium flex items-center gap-1.5">
                               {isFree(p) ? (
                                 <Zap className="w-4 h-4 text-yellow-400" />
@@ -992,14 +1443,18 @@ export default function Dashboard() {
                               ) : (
                                 <ShieldCheck className="w-4 h-4 text-[#32D74B]" />
                               )}
-                              {isFree(p) ? 'Бесплатная активация' : p.method === 'stars' ? 'Telegram Stars' : 'Криптовалюта'}
+                              {isFree(p)
+                                ? t('hist.freeActivation')
+                                : p.method === 'stars'
+                                  ? 'Telegram Stars'
+                                  : t('hist.crypto')}
                             </span>
                           </div>
 
                           <div className="w-full h-px bg-white/[0.05]" />
 
                           <div className="flex justify-between items-start gap-4">
-                            <span className="text-[14px] text-[#8E8E93] shrink-0">Номер заказа</span>
+                            <span className="text-[14px] text-[#8E8E93] shrink-0">{t('hist.orderNo')}</span>
                             <span className="text-[14px] text-white/60 font-mono tracking-tight text-right break-all">
                               {p.payment_uid || p.id}
                             </span>
@@ -1009,7 +1464,7 @@ export default function Dashboard() {
                             <>
                               <div className="w-full h-px bg-white/[0.05]" />
                               <div className="flex flex-col gap-1.5">
-                                <span className="text-[14px] text-[#8E8E93]">ID транзакции</span>
+                                <span className="text-[14px] text-[#8E8E93]">{t('hist.txid')}</span>
                                 <div className="flex items-center justify-between bg-black/20 p-2.5 rounded-xl border border-white/[0.05]">
                                   <span className="text-[13px] text-white/50 font-mono truncate max-w-[240px]">
                                     {String(p.tx_hash)}
@@ -1018,7 +1473,7 @@ export default function Dashboard() {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       navigator.clipboard.writeText(String(p.tx_hash));
-                                      tg.showAlert('Скопировано');
+                                      tg.showAlert(t('common.copied'));
                                     }}
                                     className="p-2 bg-white/10 hover:bg-white/15 rounded-lg active:scale-95 transition-all ml-3 shrink-0"
                                   >
@@ -1029,33 +1484,34 @@ export default function Dashboard() {
                             </>
                           )}
 
-                          <div className="pt-2">
-                            <button
-                              onClick={() => {
-                                hapticFeedback.impactOccurred('light');
-                                setSelectedReceipt(p);
-                              }}
-                              className="w-full h-11 bg-white/[0.08] hover:bg-white/[0.12] active:bg-white/[0.15] active:scale-[0.98] transition-all rounded-xl flex items-center justify-center gap-2 text-white font-medium text-[15px]"
-                            >
-                              <FileText className="w-4 h-4" />
-                              Открыть кассовый чек
-                            </button>
-                          </div>
+                          {done && (
+                            <div className="pt-2">
+                              <button
+                                onClick={() => {
+                                  hapticFeedback.impactOccurred('light');
+                                  setSelectedReceipt(p);
+                                }}
+                                className="w-full h-11 bg-white/[0.08] hover:bg-white/[0.12] active:bg-white/[0.15] active:scale-[0.98] transition-all rounded-xl flex items-center justify-center gap-2 text-white font-medium text-[15px]"
+                              >
+                                <FileText className="w-4 h-4" />
+                                {t('hist.receipt')}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-24">
+                  <div className="w-20 h-20 bg-white/[0.03] rounded-[30px] flex items-center justify-center mx-auto mb-6 border border-white/5">
+                    <History className="w-10 h-10 text-[#8E8E93]/20" />
                   </div>
-                ) : (
-                  <div className="text-center py-24">
-                    <div className="w-20 h-20 bg-white/[0.03] rounded-[30px] flex items-center justify-center mx-auto mb-6 border border-white/5">
-                      <History className="w-10 h-10 text-[#8E8E93]/20" />
-                    </div>
-                    <h4 className="text-[20px] font-bold text-white mb-2">История пуста</h4>
-                    <p className="text-[15px] text-[#8E8E93] px-10 opacity-60">
-                      Ваши завершенные транзакции будут отображаться здесь.
-                    </p>
-                  </div>
-                )}
+                  <h4 className="text-[20px] font-bold text-white mb-2">{t('hist.empty')}</h4>
+                  <p className="text-[15px] text-[#8E8E93] px-10 opacity-60">{t('hist.emptyHint')}</p>
+                </div>
+              )}
             </div>
           </motion.div>
         )}

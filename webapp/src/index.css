@@ -16,6 +16,16 @@
     animation: pop 150ms cubic-bezier(0.32, 0.72, 0, 1);
   }
 
+  /* Пульсация зелёной точки «Защита активна»: мягкая расходящаяся волна */
+  @keyframes dot-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(50, 215, 75, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(50, 215, 75, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(50, 215, 75, 0); }
+  }
+  .dot-pulse {
+    animation: dot-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
   /* ---------- Стеклянные поверхности (liquid glass) ---------- */
 
   /* Основная карточка */

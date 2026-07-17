@@ -498,6 +498,41 @@ function OverviewPage() {
         </Card>
       </Section>
 
+      {/* Реферальная программа */}
+      {stats.referral?.available && (
+        <Section title="Реферальная программа">
+          <Card className="p-5 flex flex-col gap-4">
+            <div className="grid grid-cols-3 gap-3 text-center">
+              {[
+                ['Приглашено', stats.referral.referred_users],
+                ['Баллов роздано', stats.referral.points_issued],
+                ['Потрачено', stats.referral.points_redeemed],
+              ].map(([label, v]) => (
+                <div key={label as string} className="bg-white/[0.04] rounded-2xl py-3 px-2">
+                  <div className="text-[20px] font-bold text-white leading-none">{v}</div>
+                  <div className="text-[11px] text-[#8E8E93] uppercase tracking-wider mt-1.5">{label}</div>
+                </div>
+              ))}
+            </div>
+            {(stats.referral.top || []).length > 0 && (
+              <div className="flex flex-col gap-2 pt-1">
+                <div className="text-[12px] text-[#8E8E93] uppercase tracking-wider font-semibold">Топ рефереров</div>
+                {(stats.referral.top as { user_id: number; points: number; username?: string; full_name?: string }[]).map(
+                  (r) => (
+                    <div key={r.user_id} className="flex justify-between text-[14px]">
+                      <span className="text-white/85 truncate pr-3">
+                        {r.username ? `@${r.username}` : r.full_name || r.user_id}
+                      </span>
+                      <span className="font-semibold text-[#D7A8FF] shrink-0">{r.points}</span>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+          </Card>
+        </Section>
+      )}
+
       {/* Топ серверов с прогресс-барами */}
       <Section title="Нагрузка серверов">
         <Card className="p-5 flex flex-col gap-4">

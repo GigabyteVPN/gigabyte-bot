@@ -3,6 +3,8 @@ import { api, Ticket } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback } from '../lib/telegram';
 import { cn } from '../lib/utils';
+import { t, locale } from '../lib/i18n';
+import { SectionTitle } from '../components/SectionTitle';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   MessageSquarePlus,
@@ -22,11 +24,11 @@ type View = 'main' | 'chat' | 'country';
 const statusBadge = (status: string) =>
   status === 'open' ? (
     <span className="px-2.5 py-1 text-[11px] rounded-full uppercase font-bold tracking-wider bg-[#32D74B]/15 text-[#32D74B]">
-      Открыт
+      {t('sup.open')}
     </span>
   ) : (
     <span className="px-2.5 py-1 text-[11px] rounded-full uppercase font-bold tracking-wider bg-white/10 text-white/50">
-      Закрыт
+      {t('sup.closed')}
     </span>
   );
 
@@ -35,9 +37,9 @@ const dayLabel = (iso: string) => {
   const today = new Date();
   const yest = new Date();
   yest.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Сегодня';
-  if (d.toDateString() === yest.toDateString()) return 'Вчера';
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  if (d.toDateString() === today.toDateString()) return t('sup.today');
+  if (d.toDateString() === yest.toDateString()) return t('sup.yesterday');
+  return d.toLocaleDateString(locale, { day: 'numeric', month: 'long' });
 };
 
 // ============================================================
@@ -78,7 +80,7 @@ function SupportChat({
       onChanged();
     } catch (e: any) {
       hapticFeedback.notificationOccurred('error');
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -93,7 +95,7 @@ function SupportChat({
       onChanged();
       onBack();
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
       setBusy(false);
     }
   };
@@ -121,10 +123,10 @@ function SupportChat({
           <Headset className="w-5 h-5 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[17px] font-bold text-white leading-tight">Поддержка Gigabyte</div>
+          <div className="text-[17px] font-bold text-white leading-tight">{t('sup.gigabyte')}</div>
           <div className="text-[12px] text-[#8E8E93]">
-            {ticket ? <span className="font-mono">{ticket.ticket_id}</span> : 'новое обращение'}
-            {ticket && !isOpen && ' · закрыт'}
+            {ticket ? <span className="font-mono">{ticket.ticket_id}</span> : t('sup.newTicket')}
+            {ticket && !isOpen && t('sup.closedSuffix')}
           </div>
         </div>
         {ticket && isOpen && (
@@ -145,9 +147,9 @@ function SupportChat({
             <div className="w-16 h-16 glass rounded-full flex items-center justify-center">
               <MessageSquarePlus className="w-8 h-8 text-[#4DA6FF]" />
             </div>
-            <div className="text-[17px] font-semibold text-white">Опишите вашу проблему</div>
+            <div className="text-[17px] font-semibold text-white">{t('sup.describe')}</div>
             <div className="text-[14px] text-[#8E8E93]">
-              Напишите сообщение ниже — мы ответим здесь и продублируем в чат с ботом.
+              {t('sup.describeHint')}
             </div>
           </div>
         )}
@@ -178,7 +180,7 @@ function SupportChat({
                     )}
                   >
                     {m.created_at
-                      ? new Date(m.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+                      ? new Date(m.created_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
                       : ''}
                   </span>
                 </div>
@@ -199,7 +201,7 @@ function SupportChat({
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Сообщение"
+            placeholder={t('sup.message')}
             className="flex-1 h-[42px] bg-white/[0.07] border border-white/10 rounded-full px-4 text-[16px] text-white placeholder:text-white/30 focus:outline-none focus:border-[#0A84FF]/50"
             onKeyDown={(e) => e.key === 'Enter' && send()}
           />
@@ -223,7 +225,7 @@ function SupportChat({
           className="shrink-0 text-center text-[13px] text-[#8E8E93] pt-3"
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }}
         >
-          Тикет закрыт. Спасибо за обращение!
+          {t('sup.ticketClosed')}
         </div>
       )}
     </div>
@@ -247,7 +249,7 @@ function CountryPage({ countries, onBack }: { countries: string[]; onBack: () =>
       setSentFor(country);
       setCustom('');
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
     } finally {
       setBusy(false);
     }
@@ -270,8 +272,8 @@ function CountryPage({ countries, onBack }: { countries: string[]; onBack: () =>
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
           <div>
-            <h1 className="text-[26px] font-bold tracking-tight leading-tight">Новая страна</h1>
-            <div className="text-[13px] text-[#8E8E93]">Предложите локацию для сервера</div>
+            <h1 className="text-[26px] font-bold tracking-tight leading-tight">{t('sup.countryTitle')}</h1>
+            <div className="text-[13px] text-[#8E8E93]">{t('sup.countrySub')}</div>
           </div>
         </header>
 
@@ -283,13 +285,13 @@ function CountryPage({ countries, onBack }: { countries: string[]; onBack: () =>
               className="glass rounded-full px-5 py-3.5 mb-5 flex items-center gap-3"
             >
               <span className="text-[20px] emoji-flag">✅</span>
-              <span className="text-[14px] text-white font-medium">Запрос «{sentFor}» отправлен администратору!</span>
+              <span className="text-[14px] text-white font-medium">{t('sup.sent', { c: sentFor })}</span>
             </motion.div>
           )}
         </AnimatePresence>
 
         <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-3 ml-4">
-          Популярные страны
+          {t('sup.popular')}
         </div>
         <div className="flex flex-wrap gap-2.5 mb-7">
           {countries.map((c) => (
@@ -305,13 +307,13 @@ function CountryPage({ countries, onBack }: { countries: string[]; onBack: () =>
         </div>
 
         <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-3 ml-4">
-          Или своя страна
+          {t('sup.custom')}
         </div>
         <div className="flex gap-2">
           <input
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
-            placeholder="Например: Исландия"
+            placeholder={t('sup.customPh')}
             className="flex-1 h-[50px] glass rounded-full px-5 text-[16px] text-white placeholder:text-white/30 focus:outline-none"
           />
           <button
@@ -391,8 +393,8 @@ export default function Support() {
 
   return (
     <div className="px-4 pt-2 flex flex-col gap-6 animate-in fade-in duration-300 pb-8">
-      <header className="mb-1 pt-2 ml-1">
-        <h1 className="text-[30px] font-bold tracking-tight">Помощь</h1>
+      <header className="pt-2">
+        <SectionTitle className="mb-0 mt-2">{t('sup.title')}</SectionTitle>
       </header>
 
       <div className="flex flex-col gap-3">
@@ -407,8 +409,8 @@ export default function Support() {
             <MessageSquarePlus className="w-6 h-6 text-[#4DA6FF]" />
           </div>
           <div className="flex-1 text-left">
-            <div className="text-[18px] font-bold text-white">Чат с поддержкой</div>
-            <div className="text-[14px] text-[#8E8E93]">Ответим в ближайшее время</div>
+            <div className="text-[18px] font-bold text-white">{t('sup.chat')}</div>
+            <div className="text-[14px] text-[#8E8E93]">{t('sup.chatHint')}</div>
           </div>
           <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
         </button>
@@ -424,15 +426,15 @@ export default function Support() {
             <Globe className="w-6 h-6 text-[#32D74B]" />
           </div>
           <div className="flex-1 text-left">
-            <div className="text-[18px] font-bold text-white">Запросить новую страну</div>
-            <div className="text-[14px] text-[#8E8E93]">Предложите локацию сервера</div>
+            <div className="text-[18px] font-bold text-white">{t('sup.country')}</div>
+            <div className="text-[14px] text-[#8E8E93]">{t('sup.countryHint')}</div>
           </div>
           <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
         </button>
       </div>
 
       <section>
-        <h2 className="text-[14px] uppercase tracking-wider text-[#8E8E93] font-semibold mb-3 ml-4">Мои обращения</h2>
+        <SectionTitle>{t('sup.myTickets')}</SectionTitle>
         {loading ? (
           <div className="ios-list p-6 flex justify-center">
             <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
@@ -442,23 +444,23 @@ export default function Support() {
             <div className="w-14 h-14 glass-inner rounded-full flex items-center justify-center mx-auto mb-4">
               <LifeBuoy className="w-7 h-7 text-[#8E8E93]" />
             </div>
-            <div className="text-[17px] font-semibold text-white mb-1">Обращений пока нет</div>
-            <div className="text-[14px] text-[#8E8E93]">Если возникнет вопрос — напишите нам.</div>
+            <div className="text-[17px] font-semibold text-white mb-1">{t('sup.noTickets')}</div>
+            <div className="text-[14px] text-[#8E8E93]">{t('sup.noTicketsHint')}</div>
           </div>
         ) : (
-          <div className="ios-list">
-            {tickets.map((t) => {
-              const last = t.messages[t.messages.length - 1];
+          <div className="flex flex-col gap-3">
+            {tickets.map((tk) => {
+              const last = tk.messages[tk.messages.length - 1];
               return (
-                <button key={t.ticket_id} onClick={() => openChat(t.ticket_id)} className="ios-list-item w-full">
+                <button key={tk.ticket_id} onClick={() => openChat(tk.ticket_id)} className="ios-list p-4 w-full flex items-center justify-between active:scale-[0.99] transition-transform">
                   <div className="flex flex-col gap-1 text-left flex-1 min-w-0 pr-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-[15px] font-bold text-white font-mono">{t.ticket_id}</span>
-                      {statusBadge(t.status)}
+                      <span className="text-[15px] font-bold text-white font-mono">{tk.ticket_id}</span>
+                      {statusBadge(tk.status)}
                     </div>
                     {last && (
                       <div className="text-[13px] text-[#8E8E93] truncate">
-                        {last.is_admin ? 'Поддержка: ' : 'Вы: '}
+                        {last.is_admin ? t('sup.supp') : t('sup.you')}
                         {last.message_text}
                       </div>
                     )}

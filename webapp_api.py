@@ -159,6 +159,24 @@ def ics_token(sub_id: str) -> str:
     ).hexdigest()[:32]
 
 
+def qr_token(sub_id: str) -> str:
+    """HMAC-подпись публичной ссылки на PNG QR-кода подписки
+    (скачивается загрузчиком Telegram без наших заголовков)."""
+    return hmac.new(
+        B.BOT_TOKEN.encode(), f"qr:{sub_id}".encode(), hashlib.sha256
+    ).hexdigest()[:32]
+
+
+_bot_username_cache: Optional[str] = None
+
+async def get_bot_username() -> str:
+    global _bot_username_cache
+    if not _bot_username_cache:
+        me = await B.bot.get_me()
+        _bot_username_cache = me.username or ""
+    return _bot_username_cache
+
+
 async def build_invoice_link(data: dict, is_extend: bool) -> str:
     stars = int(data.get("stars", 0))
     label = months_label(data.get("months", 0))
@@ -256,6 +274,18 @@ async def api_bootstrap(request: web.Request) -> web.Response:
     trial_res = await B.supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
     servers = await B.load_servers_from_supabase()
 
+    # Баллы и настройка напоминаний — устойчиво к отсутствию колонок.
+    ref_points = 0
+    reminders_enabled = True
+    try:
+        row = await B.supabase.table("users").select("ref_points, reminders_enabled").eq(
+            "user_id", user_id).execute()
+        if row.data:
+            ref_points = int(row.data[0].get("ref_points") or 0)
+            reminders_enabled = row.data[0].get("reminders_enabled") is not False
+    except Exception:
+        pass
+
     return ok({
         "user": {"id": user_id, "username": user.get("username"),
                  "first_name": user.get("first_name"), "last_name": user.get("last_name")},
@@ -269,6 +299,14 @@ async def api_bootstrap(request: web.Request) -> web.Response:
         "contracts": {"USDT": B.USDT_CONTRACT, "USDC": B.USDC_CONTRACT},
         "offer_url": B.OFFER_URL,
         "privacy_url": B.PRIVACY_URL,
+        "ref_points": ref_points,
+        "reminders_enabled": reminders_enabled,
+        "referral": {
+            "points_signup": B.REF_POINTS_SIGNUP,
+            "points_purchase": B.REF_POINTS_PURCHASE,
+            "redeem_cost": B.REF_REDEEM_COST,
+            "redeem_months": B.REF_REDEEM_MONTHS,
+        },
     })
 
 
@@ -300,6 +338,10 @@ async def api_subscriptions(request: web.Request) -> web.Response:
             "ics_url": (
                 f"/api/public/reminder.ics?sub_id={s['sub_id']}&t={ics_token(s['sub_id'])}"
                 if is_active and expiry > 0 else None
+            ),
+            "qr_url": (
+                f"/api/public/subqr.png?sub_id={s['sub_id']}&t={qr_token(s['sub_id'])}"
+                if is_active and server else None
             ),
         })
     return ok(subs)
@@ -378,9 +420,11 @@ async def api_payments(request: web.Request) -> web.Response:
     pending_res = await B.supabase.table("payments").select("*").eq("user_id", user_id).in_(
         "status", ["pending_crypto", "awaiting_hash", "pending_stars"]
     ).execute()
-    history_res = await B.supabase.table("payments").select("*").eq("user_id", user_id).eq(
-        "status", "completed"
-    ).order("created_at", desc=True).limit(50).execute()
+    # История — ВСЕ завершившиеся операции пользователя (оплаченные,
+    # отменённые/просроченные, зависшие confirmed), не только completed.
+    history_res = await B.supabase.table("payments").select("*").eq("user_id", user_id).not_.in_(
+        "status", ["pending_crypto", "awaiting_hash", "pending_stars"]
+    ).order("created_at", desc=True).limit(100).execute()
 
     def strip(p: dict) -> dict:
         return {
@@ -603,6 +647,7 @@ async def api_submit_hash(request: web.Request) -> web.Response:
             )
         await B.supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
         await B.supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+        await B.award_referral_purchase(user_id, pay_data.get("rub") or 0, payment_id)
         return ok({"verified": True, "extended": True})
 
     sub_link = await B.create_subscription(user_id, pay_data["server"], pay_data["months"], pay_data["rub"], payment_id)
@@ -862,6 +907,206 @@ async def api_delete_account(request: web.Request) -> web.Response:
     return ok({"deleted_subscriptions": deleted_count})
 
 
+# ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
+async def api_referral(request: web.Request) -> web.Response:
+    """Сводка реферальной программы пользователя: ссылка, баллы, история."""
+    user_id = request["user_id"]
+    username = await get_bot_username()
+    link = f"https://t.me/{username}?start=ref_{user_id}"
+
+    points = 0
+    invited_total = 0
+    invited_paid = 0
+    history: List[dict] = []
+    schema_ok = await B.referral_schema_available()
+    if schema_ok:
+        try:
+            row = await B.supabase.table("users").select("ref_points").eq("user_id", user_id).execute()
+            points = int(row.data[0].get("ref_points") or 0) if row.data else 0
+            inv = await B.supabase.table("users").select("user_id", count="exact").eq(
+                "referred_by", user_id).execute()
+            invited_total = inv.count or 0
+            paid = await B.supabase.table("point_transactions").select("id", count="exact").eq(
+                "user_id", user_id).eq("reason", "referral_purchase").execute()
+            invited_paid = paid.count or 0
+            tx = await B.supabase.table("point_transactions").select(
+                "delta, reason, created_at").eq("user_id", user_id).order(
+                "created_at", desc=True).limit(30).execute()
+            history = tx.data or []
+        except Exception as e:
+            logger.warning(f"referral summary error: {e}")
+
+    return ok({
+        "available": schema_ok,
+        "link": link,
+        "points": points,
+        "invited_total": invited_total,
+        "invited_paid": invited_paid,
+        "history": history,
+        "points_signup": B.REF_POINTS_SIGNUP,
+        "points_purchase": B.REF_POINTS_PURCHASE,
+        "redeem_cost": B.REF_REDEEM_COST,
+        "redeem_months": B.REF_REDEEM_MONTHS,
+    })
+
+
+async def api_referral_redeem(request: web.Request) -> web.Response:
+    """Обмен баллов на VPN: продление активной подписки или новая подписка.
+
+    Порядок «сначала списать, потом выдать, при сбое вернуть» исключает
+    двойную выдачу при гонке запросов."""
+    user_id = request["user_id"]
+    if not await B.referral_schema_available():
+        return err("Реферальная программа временно недоступна", 503)
+    body = await request.json()
+    sub_id = body.get("sub_id")
+    server_id = body.get("server_id")
+    cost = B.REF_REDEEM_COST
+    months = B.REF_REDEEM_MONTHS
+
+    # 1) Списание с оптимистичной блокировкой (guard по старому балансу).
+    deducted = False
+    for _ in range(3):
+        row = await B.supabase.table("users").select("ref_points").eq("user_id", user_id).execute()
+        current = int(row.data[0].get("ref_points") or 0) if row.data else 0
+        if current < cost:
+            return err(f"Недостаточно баллов: нужно {cost}, у вас {current}")
+        upd = await B.supabase.table("users").update(
+            {"ref_points": current - cost}
+        ).eq("user_id", user_id).eq("ref_points", current).execute()
+        if upd.data:
+            deducted = True
+            break
+    if not deducted:
+        return err("Не удалось списать баллы, попробуйте ещё раз", 409)
+
+    async def refund():
+        try:
+            row2 = await B.supabase.table("users").select("ref_points").eq("user_id", user_id).execute()
+            cur2 = int(row2.data[0].get("ref_points") or 0) if row2.data else 0
+            await B.supabase.table("users").update({"ref_points": cur2 + cost}).eq("user_id", user_id).execute()
+        except Exception:
+            logger.error(f"КРИТИЧНО: не удалось вернуть {cost} баллов пользователю {user_id}")
+
+    try:
+        await B.supabase.table("point_transactions").insert({
+            "user_id": user_id, "delta": -cost, "reason": "redeem",
+        }).execute()
+    except Exception:
+        pass  # журнал не должен блокировать выдачу
+
+    # 2) Выдача: продление своей активной подписки или создание новой.
+    servers = await B.load_servers_from_supabase()
+    try:
+        if sub_id:
+            sub_res = await B.supabase.table("subscriptions").select(
+                "expiry_date, user_id").eq("sub_id", sub_id).eq("status", "active").execute()
+            if not sub_res.data or sub_res.data[0]["user_id"] != user_id:
+                await refund()
+                return err("Подписка не найдена или не принадлежит вам", 404)
+            new_expiry = sub_res.data[0]["expiry_date"] + months * 30 * 24 * 3600 * 1000
+            await B.supabase.table("subscriptions").update(
+                {"expiry_date": new_expiry}).eq("sub_id", sub_id).execute()
+            if not await B.extend_subscription_in_panel(sub_id, new_expiry):
+                await notify_admins(
+                    f"⚠️ Обмен баллов: не удалось обновить expiryTime в панели "
+                    f"для {sub_id} (пользователь {user_id})."
+                )
+            return ok({"redeemed": True, "extended": True, "months": months})
+
+        server = next((s for s in servers if s["id"] == server_id), servers[0] if servers else None)
+        if not server:
+            await refund()
+            return err("Нет доступных серверов", 500)
+        sub_link = await B.create_subscription(user_id, server, months, 0, None)
+        if not sub_link:
+            await refund()
+            return err("Не удалось создать подписку. Баллы возвращены.", 500)
+        return ok({"redeemed": True, "extended": False, "months": months, "sub_link": sub_link})
+    except web.HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"redeem error: {e}")
+        await refund()
+        return err("Ошибка обмена баллов. Баллы возвращены.", 500)
+
+
+# ====================== НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ ======================
+async def api_settings_reminders(request: web.Request) -> web.Response:
+    """Вкл/выкл напоминаний об истечении подписки (шлёт бот в чат)."""
+    user_id = request["user_id"]
+    body = await request.json()
+    enabled = bool(body.get("enabled"))
+    try:
+        await B.supabase.table("users").update(
+            {"reminders_enabled": enabled}).eq("user_id", user_id).execute()
+    except Exception:
+        return err(
+            "Настройка недоступна: примените миграцию БД "
+            "(migrations/2026-07-17_referral_reminders_lang.sql)", 503)
+    return ok({"enabled": enabled})
+
+
+# ====================== QR-КОД ПОДПИСКИ ======================
+async def api_public_sub_qr(request: web.Request) -> web.Response:
+    """PNG QR-кода ссылки-подписки. Публичный (скачивает Telegram),
+    защищён HMAC-токеном — как reminder.ics."""
+    sub_id = request.query.get("sub_id", "")
+    token = request.query.get("t", "")
+    if not sub_id or len(sub_id) > 64 or not hmac.compare_digest(token, qr_token(sub_id)):
+        return err("Неверная ссылка", 403)
+    await B.init_supabase()
+    res = await B.supabase.table("subscriptions").select("server_id, status").eq(
+        "sub_id", sub_id).execute()
+    if not res.data or res.data[0].get("status") != "active":
+        return err("Подписка не найдена", 404)
+    servers = await B.load_servers_from_supabase()
+    server = next((s for s in servers if s["id"] == res.data[0]["server_id"]), None)
+    if not server:
+        return err("Сервер не найден", 404)
+    png = B.generate_qr_png(B.generate_subscription_link(server, sub_id))
+    return web.Response(
+        body=png, content_type="image/png",
+        headers={"Content-Disposition": 'attachment; filename="gigabyte-vpn-qr.png"'},
+    )
+
+
+async def api_sub_qr_share(request: web.Request) -> web.Response:
+    """Отправляет QR подписки в чат пользователя с ботом — оттуда его можно
+    переслать любому контакту или сохранить в галерею."""
+    user_id = request["user_id"]
+    sub_id = request.match_info["sub_id"]
+    res = await B.supabase.table("subscriptions").select("user_id, server_id, status").eq(
+        "sub_id", sub_id).execute()
+    if not res.data or res.data[0]["user_id"] != user_id:
+        return err("Подписка не найдена", 404)
+    if res.data[0].get("status") != "active":
+        return err("Подписка не активна")
+    servers = await B.load_servers_from_supabase()
+    server = next((s for s in servers if s["id"] == res.data[0]["server_id"]), None)
+    if not server:
+        return err("Сервер не найден", 404)
+    sub_link = B.generate_subscription_link(server, sub_id)
+    png = B.generate_qr_png(sub_link)
+    from aiogram.types import BufferedInputFile
+    try:
+        await B.bot.send_photo(
+            user_id,
+            BufferedInputFile(png, filename="gigabyte-vpn-qr.png"),
+            caption=(
+                "📲 <b>QR-код вашей подписки Gigabyte</b>\n\n"
+                "Отсканируйте его в VPN-приложении на другом устройстве "
+                "или перешлите это сообщение.\n\n"
+                f"🔗 Ссылка-подписка:\n<code>{B.esc(sub_link)}</code>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning(f"qr share failed for {user_id}: {e}")
+        return err("Не удалось отправить QR в чат. Откройте чат с ботом и попробуйте снова.", 500)
+    return ok({"sent": True})
+
+
 # ====================== АДМИН-ЭНДПОИНТЫ ======================
 async def api_admin_stats(request: web.Request) -> web.Response:
     now = datetime.now()
@@ -922,6 +1167,36 @@ async def api_admin_stats(request: web.Request) -> web.Response:
 
     recent = sorted(completed, key=lambda p: p.get("created_at") or "", reverse=True)[:8]
 
+    # Реферальная программа: сколько баллов роздано/потрачено, топ рефереров.
+    referral = {"available": False, "points_issued": 0, "points_redeemed": 0,
+                "referred_users": 0, "top": []}
+    if await B.referral_schema_available():
+        try:
+            txs = await B.fetch_all_supabase_rows("point_transactions", "user_id, delta, reason")
+            referral["available"] = True
+            referral["points_issued"] = sum(t["delta"] for t in txs if t["delta"] > 0)
+            referral["points_redeemed"] = -sum(t["delta"] for t in txs if t["delta"] < 0)
+            ref_users = await B.supabase.table("users").select("user_id", count="exact").not_.is_(
+                "referred_by", "null").execute()
+            referral["referred_users"] = ref_users.count or 0
+            by_user: Dict[int, int] = {}
+            for t in txs:
+                if t["delta"] > 0:
+                    by_user[t["user_id"]] = by_user.get(t["user_id"], 0) + t["delta"]
+            top_ids = sorted(by_user, key=lambda u: -by_user[u])[:5]
+            if top_ids:
+                urows = await B.supabase.table("users").select("user_id, username, full_name").in_(
+                    "user_id", top_ids).execute()
+                umap = {u["user_id"]: u for u in (urows.data or [])}
+                referral["top"] = [
+                    {"user_id": uid, "points": by_user[uid],
+                     "username": umap.get(uid, {}).get("username"),
+                     "full_name": umap.get(uid, {}).get("full_name")}
+                    for uid in top_ids
+                ]
+        except Exception as e:
+            logger.warning(f"admin referral stats error: {e}")
+
     # Дневные ряды за последние 14 дней — для графиков дашборда
     day_map: Dict[str, Dict[str, Any]] = {}
     for i in range(13, -1, -1):
@@ -952,6 +1227,7 @@ async def api_admin_stats(request: web.Request) -> web.Response:
         "pending_payments": pending_cnt.count,
         "open_tickets": tickets_cnt.count,
         "recent_payments": recent,
+        "referral": referral,
     })
 
 
@@ -1508,7 +1784,12 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/country-requests", api_country_request)
     r.add_delete("/api/account", api_delete_account)
     r.add_get("/api/public/reminder.ics", api_public_reminder_ics)
+    r.add_get("/api/public/subqr.png", api_public_sub_qr)
     r.add_get("/api/subscriptions/{sub_id}/stats", api_sub_stats)
+    r.add_post("/api/subscriptions/{sub_id}/qr/share", api_sub_qr_share)
+    r.add_get("/api/referral", api_referral)
+    r.add_post("/api/referral/redeem", api_referral_redeem)
+    r.add_post("/api/settings/reminders", api_settings_reminders)
     # Админские
     r.add_get("/api/admin/stats", api_admin_stats)
     r.add_get("/api/admin/rates", api_admin_rates)
