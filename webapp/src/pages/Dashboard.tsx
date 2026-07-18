@@ -36,6 +36,9 @@ import {
 } from 'lucide-react';
 import { cn, formatBytes } from '../lib/utils';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { LANG } from '../lib/i18n';
+import { TERMS, PRIVACY } from '../lib/legal';
+import Legal from './Legal';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -771,6 +774,7 @@ export default function Dashboard() {
   const [hashPayment, setHashPayment] = useState<Payment | null>(null);
   const [qrSub, setQrSub] = useState<Subscription | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [legal, setLegal] = useState<'terms' | 'privacy' | null>(null);
   const [remindersOn, setRemindersOn] = useState(boot.reminders_enabled !== false);
   const [remindersBusy, setRemindersBusy] = useState(false);
   const [qrShareBusy, setQrShareBusy] = useState(false);
@@ -1216,20 +1220,20 @@ export default function Dashboard() {
       <section>
         <SectionTitle>{t('dash.account')}</SectionTitle>
         <div className="ios-list overflow-hidden">
-          <a href={boot.offer_url} target="_blank" rel="noreferrer" className="ios-list-item w-full">
+          <button onClick={() => { hapticFeedback.selectionChanged(); setLegal('terms'); }} className="ios-list-item w-full">
             <div className="flex items-center gap-4">
               <FileText className="w-5 h-5 text-[#0A84FF]" />
               <span className="text-[16px] text-white font-medium">{t('terms.offer')}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
-          </a>
-          <a href={boot.privacy_url} target="_blank" rel="noreferrer" className="ios-list-item w-full">
+          </button>
+          <button onClick={() => { hapticFeedback.selectionChanged(); setLegal('privacy'); }} className="ios-list-item w-full">
             <div className="flex items-center gap-4">
               <Lock className="w-5 h-5 text-[#0A84FF]" />
               <span className="text-[16px] text-white font-medium">{t('terms.privacy')}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
-          </a>
+          </button>
           {!boot.is_admin && (
             <button onClick={() => setConfirmDelete(true)} className="ios-list-item w-full">
               <div className="flex items-center gap-4">
@@ -1240,6 +1244,17 @@ export default function Dashboard() {
           )}
         </div>
       </section>
+
+      {/* ---- Юридические документы (в приложении) ---- */}
+      <AnimatePresence>
+        {legal && (
+          <Legal
+            kind={legal}
+            doc={legal === 'terms' ? TERMS[LANG] : PRIVACY[LANG]}
+            onClose={() => setLegal(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ---- Модалка QR подписки: показать, скачать, поделиться ---- */}
       <AnimatePresence>

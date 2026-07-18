@@ -54,8 +54,6 @@ export type Bootstrap = {
   countries: string[];
   wallet: string;
   contracts: { USDT: string; USDC: string };
-  offer_url: string;
-  privacy_url: string;
   ref_points?: number;
   reminders_enabled?: boolean;
   referral?: { points_signup: number; points_purchase: number; redeem_cost: number; redeem_months: number };

@@ -69,9 +69,8 @@ ALCHEMY_API_KEY: str = os.getenv("ALCHEMY_API_KEY") or ""
 XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "true")
 
 # ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ ======================
-# Ссылки на публичную оферту и политику конфиденциальности.
-OFFER_URL: str = "https://telegra.ph/PUBLICHNAYA-OFERTA-Dogovor-na-okazanie-uslug-07-01"
-PRIVACY_URL: str = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-07-01-51"
+# Публичная оферта и политика конфиденциальности встроены в приложение
+# (webapp/src/lib/legal.ts, просмотр — webapp/src/pages/Legal.tsx, RU/EN).
 
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
 # Баллы начисляются ТОЛЬКО когда приглашённый друг оплатил подписку
@@ -2312,21 +2311,30 @@ async def set_accepted_terms(user_id: int):
         logger.warning(f"Не удалось сохранить accepted_terms в БД (возможно, отсутствует колонка): {e}")
 
 def terms_card_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Публичная оферта", url=OFFER_URL)],
-        [InlineKeyboardButton(text="🔒 Политика конфиденциальности", url=PRIVACY_URL)],
-        [InlineKeyboardButton(text="✅ Принять", callback_data="accept_terms")]
-    ])
+    """Онбординг ведёт в приложение: там профессиональный экран приветствия,
+    оферта и политика (встроены в приложение), и там же принимаются условия.
+    Кнопка «Принять» остаётся как быстрый путь прямо из чата."""
+    webapp_url = os.getenv("WEBAPP_URL")
+    rows = []
+    if webapp_url:
+        from aiogram.types import WebAppInfo
+        rows.append([InlineKeyboardButton(
+            text="📱 Открыть приложение и условия",
+            web_app=WebAppInfo(url=webapp_url),
+        )])
+    rows.append([InlineKeyboardButton(text="✅ Принять условия", callback_data="accept_terms")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 async def send_terms_card(message: Message):
-    """Карточка с документами и кнопкой «Принять». Нижнее меню НЕ показываем."""
+    """Карточка приветствия с переходом в приложение и кнопкой «Принять»."""
     await message.answer(
         "👋 <b>Добро пожаловать в Gigabyte</b>\n\n"
-        "⚡ Высокая скорость соединения\n"
-        "🔐 Защищённое шифрованное подключение\n"
-        "📶 Безопасность в публичных сетях Wi-Fi\n\n"
-        "📄 Перед использованием ознакомьтесь с документами ниже и нажмите «✅ Принять», "
-        "чтобы продолжить.",
+        "⚡ Высокая скорость — серверы без ограничений трафика\n"
+        "🔐 Надёжное шифрование ваших данных\n"
+        "📶 Защита в публичных сетях Wi-Fi\n"
+        "🙈 Без логов — мы не храним вашу активность\n\n"
+        "Откройте приложение, чтобы ознакомиться с публичной офертой и политикой "
+        "конфиденциальности и начать пользоваться сервисом.",
         parse_mode=ParseMode.HTML,
         reply_markup=terms_card_keyboard()
     )
@@ -2410,30 +2418,25 @@ async def accept_terms_callback(callback: CallbackQuery):
     await callback.answer("Условия приняты ✅")
 
 # ====================== ЮРИДИЧЕСКИЕ ДОКУМЕНТЫ (КНОПКИ МЕНЮ) ======================
+# Документы теперь встроены в приложение (профессиональный просмотр, RU/EN).
 @router.message(F.text == "📄 Публичная оферта")
 async def show_offer(message: Message, state: FSMContext):
     await state.clear()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📄 Открыть публичную оферту", url=OFFER_URL)]
-    ])
     await message.answer(
         "📄 <b>Публичная оферта</b>\n\n"
-        "Договор на оказание услуг. Нажмите кнопку ниже, чтобы открыть документ:",
+        "Договор на оказание услуг доступен в приложении — раздел «Аккаунт».",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb
+        reply_markup=webapp_inline_keyboard()
     )
 
 @router.message(F.text == "🔒 Политика конфиденциальности")
 async def show_privacy(message: Message, state: FSMContext):
     await state.clear()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔒 Открыть политику конфиденциальности", url=PRIVACY_URL)]
-    ])
     await message.answer(
         "🔒 <b>Политика конфиденциальности</b>\n\n"
-        "Как мы обрабатываем и защищаем ваши данные. Нажмите кнопку ниже, чтобы открыть документ:",
+        "Как мы обрабатываем и защищаем ваши данные — в приложении, раздел «Аккаунт».",
         parse_mode=ParseMode.HTML,
-        reply_markup=kb
+        reply_markup=webapp_inline_keyboard()
     )
 
 # ====================== ПРОБНАЯ ПОДПИСКА ======================
@@ -4922,8 +4925,16 @@ async def main():
     app = web.Application()
 
     if WEBHOOK_HOST:
-        dp.startup.register(lambda: on_startup(bot))
-        dp.shutdown.register(lambda: on_shutdown(bot))
+        # Обёртки-корутины: sync-lambda возвращала невыполненную корутину
+        # (RuntimeWarning: coroutine was never awaited). Регистрируем async.
+        async def _startup() -> None:
+            await on_startup(bot)
+
+        async def _shutdown() -> None:
+            await on_shutdown(bot)
+
+        dp.startup.register(_startup)
+        dp.shutdown.register(_shutdown)
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,

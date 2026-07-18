@@ -331,8 +331,6 @@ async def api_bootstrap(request: web.Request) -> web.Response:
         "countries": available_countries(servers),
         "wallet": B.ARBITRUM_WALLET,
         "contracts": {"USDT": B.USDT_CONTRACT, "USDC": B.USDC_CONTRACT},
-        "offer_url": B.OFFER_URL,
-        "privacy_url": B.PRIVACY_URL,
         "ref_points": ref_points,
         "reminders_enabled": reminders_enabled,
         "referral": {

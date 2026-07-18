@@ -1,11 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ShieldCheck, FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
+import { FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy, Zap, ShieldCheck, Wifi, EyeOff, ChevronRight } from 'lucide-react';
 import { BottomNav, NavTab } from './components/layout/BottomNav';
 import { initTelegramApp, tg, hapticFeedback } from './lib/telegram';
 import { api, Bootstrap, ApiError } from './lib/api';
 import { AppContext } from './lib/AppContext';
-import { t } from './lib/i18n';
+import { t, LANG } from './lib/i18n';
+import { TERMS, PRIVACY } from './lib/legal';
+import Legal from './pages/Legal';
+import logoUrl from './assets/logo.png';
 
 import Dashboard from './pages/Dashboard';
 import Buy from './pages/Buy';
@@ -42,8 +46,16 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
   );
 }
 
-function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => void }) {
+const WELCOME_FEATURES = [
+  { icon: Zap, tint: '#FFD60A', t: 'feat.speed.t', d: 'feat.speed.d' },
+  { icon: ShieldCheck, tint: '#32D74B', t: 'feat.secure.t', d: 'feat.secure.d' },
+  { icon: Wifi, tint: '#0A84FF', t: 'feat.wifi.t', d: 'feat.wifi.d' },
+  { icon: EyeOff, tint: '#BF5AF2', t: 'feat.nolog.t', d: 'feat.nolog.d' },
+];
+
+function TermsGate({ onAccepted }: { onAccepted: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [legal, setLegal] = useState<'terms' | 'privacy' | null>(null);
 
   const accept = async () => {
     setBusy(true);
@@ -52,55 +64,97 @@ function TermsGate({ boot, onAccepted }: { boot: Bootstrap; onAccepted: () => vo
       hapticFeedback.notificationOccurred('success');
       onAccepted();
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка');
+      tg.showAlert(e.message || t('common.error'));
       setBusy(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-end px-5 pb-10 pt-16">
-      <div className="flex-1 flex flex-col items-center justify-center text-center gap-5">
-        <div className="w-20 h-20 app-icon rounded-[28px] flex items-center justify-center bg-gradient-to-b from-[#2E9BFF]/40 to-[#0A84FF]/20 shadow-[0_8px_40px_rgba(10,132,255,0.35)]">
-          <ShieldCheck className="w-10 h-10 text-[#4DA6FF]" />
+    <div
+      className="min-h-screen flex flex-col px-5 pb-8"
+      style={{
+        paddingTop: 'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 12px), 24px)',
+      }}
+    >
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 py-4">
+        {/* Логотип бренда */}
+        <div className="relative">
+          <div className="absolute inset-0 blur-3xl bg-[#0A84FF]/25 rounded-full scale-90" />
+          <img
+            src={logoUrl}
+            alt="Gigabyte"
+            className="relative w-[132px] h-[132px] object-contain drop-shadow-[0_8px_40px_rgba(10,132,255,0.45)]"
+          />
         </div>
-        <h1 className="text-[30px] font-bold tracking-tight text-white">
-          {t('terms.welcome')} <br /> Gigabyte
-        </h1>
-        <div className="text-[15px] text-[#8E8E93] leading-relaxed max-w-[300px] whitespace-pre-line">
-          {t('terms.features')}
+
+        <div className="text-center">
+          <h1 className="text-[30px] font-bold tracking-tight text-white leading-tight">
+            {t('terms.welcome')}
+          </h1>
+          <div className="text-[15px] text-[#8E8E93] leading-relaxed max-w-[320px] mx-auto mt-2.5">
+            {t('terms.tagline')}
+          </div>
+        </div>
+
+        {/* Преимущества карточками */}
+        <div className="w-full max-w-[420px] flex flex-col gap-2.5 mt-1">
+          {WELCOME_FEATURES.map((f) => (
+            <div key={f.t} className="glass rounded-3xl p-3.5 flex items-center gap-3.5">
+              <div
+                className="w-11 h-11 rounded-2xl app-icon flex items-center justify-center shrink-0"
+                style={{ background: `linear-gradient(180deg, ${f.tint}55, ${f.tint}1f)` }}
+              >
+                <f.icon className="w-[22px] h-[22px]" style={{ color: f.tint }} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[15.5px] font-semibold text-white leading-tight">{t(f.t)}</div>
+                <div className="text-[13px] text-[#8E8E93] leading-snug mt-0.5">{t(f.d)}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 mt-10">
-        <a
-          href={boot.offer_url}
-          target="_blank"
-          rel="noreferrer"
-          className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
-        >
-          <FileText className="w-5 h-5 text-[#0A84FF] shrink-0" />
-          <span className="text-[16px] text-white font-medium">{t('terms.offer')}</span>
-        </a>
-        <a
-          href={boot.privacy_url}
-          target="_blank"
-          rel="noreferrer"
-          className="glass rounded-3xl p-4 flex items-center gap-3 active:scale-[0.98] transition-transform"
-        >
-          <Lock className="w-5 h-5 text-[#0A84FF] shrink-0" />
-          <span className="text-[16px] text-white font-medium">{t('terms.privacy')}</span>
-        </a>
+      {/* Документы + принятие */}
+      <div className="w-full max-w-[420px] mx-auto flex flex-col gap-2.5 mt-4">
+        <div className="glass rounded-3xl overflow-hidden">
+          <button
+            onClick={() => { hapticFeedback.selectionChanged(); setLegal('terms'); }}
+            className="w-full p-4 flex items-center gap-3 active:bg-white/[0.04] transition-colors"
+          >
+            <FileText className="w-5 h-5 text-[#0A84FF] shrink-0" />
+            <span className="flex-1 text-left text-[16px] text-white font-medium">{t('terms.offer')}</span>
+            <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
+          </button>
+          <div className="h-px bg-white/[0.07] ml-[52px]" />
+          <button
+            onClick={() => { hapticFeedback.selectionChanged(); setLegal('privacy'); }}
+            className="w-full p-4 flex items-center gap-3 active:bg-white/[0.04] transition-colors"
+          >
+            <Lock className="w-5 h-5 text-[#0A84FF] shrink-0" />
+            <span className="flex-1 text-left text-[16px] text-white font-medium">{t('terms.privacy')}</span>
+            <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
+          </button>
+        </div>
         <button
           onClick={accept}
           disabled={busy}
-          className="w-full py-4 btn-primary rounded-3xl text-white font-bold text-[17px] active:scale-[0.98] transition-transform disabled:opacity-60 mt-2"
+          className="w-full py-4 btn-primary rounded-3xl text-white font-bold text-[17px] active:scale-[0.98] transition-transform disabled:opacity-60 mt-1"
         >
           {busy ? t('common.wait') : t('terms.accept')}
         </button>
-        <div className="text-[12px] text-[#8E8E93]/70 text-center px-6">
-          {t('terms.note')}
-        </div>
+        <div className="text-[12px] text-[#8E8E93]/70 text-center px-6">{t('terms.note')}</div>
       </div>
+
+      <AnimatePresence>
+        {legal && (
+          <Legal
+            kind={legal}
+            doc={legal === 'terms' ? TERMS[LANG] : PRIVACY[LANG]}
+            onClose={() => setLegal(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -154,7 +208,7 @@ export default function App() {
   if (error || !boot) return <ErrorScreen message={error || 'Ошибка'} onRetry={() => load()} />;
 
   if (!boot.accepted_terms && !boot.is_admin) {
-    return <TermsGate boot={boot} onAccepted={() => setBoot({ ...boot, accepted_terms: true })} />;
+    return <TermsGate onAccepted={() => setBoot({ ...boot, accepted_terms: true })} />;
   }
 
   return (

@@ -32,16 +32,24 @@ const dict: Dict = {
 
   // ---------- Онбординг ----------
   'terms.welcome': { ru: 'Добро пожаловать', en: 'Welcome' },
-  'terms.features': {
-    ru: '⚡ Высокая скорость соединения\n🔐 Защищённое шифрованное подключение\n📶 Безопасность в публичных сетях Wi-Fi',
-    en: '⚡ High-speed connection\n🔐 Encrypted, secure tunnel\n📶 Safety on public Wi-Fi networks',
+  'terms.tagline': {
+    ru: 'Быстрый и приватный VPN. Ваше соединение под надёжной защитой — на любом устройстве.',
+    en: 'Fast, private VPN. Your connection stays protected — on every device.',
   },
+  'feat.speed.t': { ru: 'Высокая скорость', en: 'High speed' },
+  'feat.speed.d': { ru: 'Оптимизированные серверы без ограничений трафика', en: 'Optimized servers with no traffic limits' },
+  'feat.secure.t': { ru: 'Надёжное шифрование', en: 'Strong encryption' },
+  'feat.secure.d': { ru: 'Современные протоколы защищают ваши данные', en: 'Modern protocols keep your data safe' },
+  'feat.wifi.t': { ru: 'Защита в Wi-Fi', en: 'Wi-Fi protection' },
+  'feat.wifi.d': { ru: 'Безопасность в открытых и публичных сетях', en: 'Safety on open and public networks' },
+  'feat.nolog.t': { ru: 'Без логов', en: 'No logs' },
+  'feat.nolog.d': { ru: 'Мы не отслеживаем и не храним вашу активность', en: 'We don’t track or store your activity' },
   'terms.offer': { ru: 'Публичная оферта', en: 'Terms of Service' },
   'terms.privacy': { ru: 'Политика конфиденциальности', en: 'Privacy Policy' },
-  'terms.accept': { ru: '✅ Принять и продолжить', en: '✅ Accept & Continue' },
+  'terms.accept': { ru: 'Принять и продолжить', en: 'Accept & Continue' },
   'terms.note': {
-    ru: 'Нажимая «Принять», вы соглашаетесь с условиями публичной оферты и политикой конфиденциальности.',
-    en: 'By tapping "Accept" you agree to the Terms of Service and Privacy Policy.',
+    ru: 'Нажимая «Принять», вы соглашаетесь с публичной офертой и политикой конфиденциальности.',
+    en: 'By tapping “Accept” you agree to the Terms of Service and Privacy Policy.',
   },
   'app.connectFail': { ru: 'Не удалось подключиться', en: 'Connection failed' },
   'app.openFromTg': {
