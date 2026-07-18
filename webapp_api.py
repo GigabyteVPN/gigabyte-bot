@@ -914,23 +914,57 @@ async def api_country_request(request: web.Request) -> web.Response:
 
 
 async def _purge_user_data(user_id: int) -> None:
-    """Удаляет все данные пользователя из БД (после отзыва доступа).
+    """Удаляет данные пользователя из БД (после отзыва доступа), но НАВСЕГДА
+    сохраняет отметку об использованном триале, иначе можно удалить аккаунт и
+    снова взять бесплатную неделю.
 
-    ВАЖНО: таблица trial_claims и записи о триале НЕ удаляются — иначе можно
-    было бы удалить аккаунт и снова взять бесплатную неделю. Триал —
-    одноразовый на Telegram-аккаунт навсегда."""
-    # payments: удаляем всё, КРОМЕ маркера использованного триала
+    Нюанс схемы: payments.user_id имеет FK на users с ON DELETE CASCADE —
+    удаление строки users каскадно стирает и триал-платёж. Поэтому:
+      • если применена таблица trial_claims (не зависит от users) — маркер
+        уже там, спокойно удаляем users целиком;
+      • если миграции ещё нет — оставляем «надгробие»: строку users с одним
+        user_id (персональные данные обнуляем), чтобы триал-платёж-маркер не
+        был удалён каскадом. Так защита работает даже до применения миграции.
+    """
+    used_trial = await B.has_used_trial(user_id)
+    trial_persisted = await B._trial_table_available()  # trial_claims переживает hard-delete
+    if used_trial:
+        await B.mark_trial_used(user_id)  # продублировать в trial_claims, если она есть
+
+    # payments: удаляем всё, КРОМЕ триал-маркера (фильтр по id в Python —
+    # надёжнее, чем .neq() в supabase-py DELETE).
     try:
-        await B.supabase.table("payments").delete().eq("user_id", user_id).neq("method", "trial").execute()
+        pays = await B.supabase.table("payments").select("id, method").eq("user_id", user_id).execute()
+        del_ids = [p["id"] for p in (pays.data or []) if (p.get("method") or "") != "trial"]
+        if del_ids:
+            await B.supabase.table("payments").delete().in_("id", del_ids).execute()
     except Exception as e:
         logger.warning(f"purge payments for {user_id}: {e}")
+
     for table in ("subscriptions", "tickets", "ticket_messages",
-                  "country_requests", "pending_confirmations", "point_transactions",
-                  "users"):
+                  "country_requests", "pending_confirmations", "point_transactions"):
         try:
             await B.supabase.table(table).delete().eq("user_id", user_id).execute()
         except Exception as e:
             logger.warning(f"purge {table} for {user_id}: {e}")
+
+    if used_trial and not trial_persisted:
+        # Надгробие: сохраняем строку users (маркер), стираем персональные данные.
+        try:
+            await B.supabase.table("users").update({
+                "username": None, "full_name": None, "referred_by": None,
+                "ref_points": 0, "lang": None, "accepted_terms": False,
+            }).eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"tombstone user {user_id}: {e}")
+            await B.supabase.table("users").delete().eq("user_id", user_id).execute()
+    else:
+        # Триал зафиксирован в trial_claims (или триала не было) — удаляем полностью.
+        try:
+            await B.supabase.table("users").delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"purge users for {user_id}: {e}")
+
     # Отвязываем тех, кого этот пользователь пригласил (реферер удалён).
     try:
         await B.supabase.table("users").update({"referred_by": None}).eq(
