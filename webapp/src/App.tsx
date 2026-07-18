@@ -117,20 +117,25 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // silent=true — фоновое обновление: без спиннера и без экрана ошибки,
+  // просто тихо обновляем данные (для авто-refetch при возврате в апп).
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const data = await api.bootstrap();
       setBoot(data);
     } catch (e: any) {
+      if (silent) return; // фоновую ошибку не показываем
       if (e instanceof ApiError && e.status === 401) {
         setError(t('app.openFromTg'));
       } else {
         setError(e.message || t('common.error'));
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -146,14 +151,14 @@ export default function App() {
   }, [load]);
 
   if (loading) return <Spinner />;
-  if (error || !boot) return <ErrorScreen message={error || 'Ошибка'} onRetry={load} />;
+  if (error || !boot) return <ErrorScreen message={error || 'Ошибка'} onRetry={() => load()} />;
 
   if (!boot.accepted_terms && !boot.is_admin) {
     return <TermsGate boot={boot} onAccepted={() => setBoot({ ...boot, accepted_terms: true })} />;
   }
 
   return (
-    <AppContext.Provider value={{ boot, refreshBoot: load }}>
+    <AppContext.Provider value={{ boot, refreshBoot: () => load(true) }}>
       <HashRouter>
         <div
           className="min-h-screen text-white"

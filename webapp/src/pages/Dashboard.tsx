@@ -533,9 +533,9 @@ const ReferralPage = ({
         ) : (
           <>
             {/* Баланс + прогресс до бесплатного месяца */}
-            <div className="ios-list p-6 relative">
+            <div className="ios-list px-6 py-7 relative">
               <div className="absolute top-0 right-0 w-40 h-40 bg-[#BF5AF2]/15 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
-              <div className="relative z-10 flex flex-col gap-5">
+              <div className="relative z-10 flex flex-col gap-6">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
                     <Gift className="w-7 h-7 text-[#D7A8FF]" />
@@ -544,9 +544,9 @@ const ReferralPage = ({
                     <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
                       {t('ref.balance')}
                     </div>
-                    <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
-                      <span className="text-[38px] font-bold text-white leading-[1.1]">{data.points}</span>
-                      <span className="text-[15px] text-[#8E8E93] font-medium">{t('ref.points')}</span>
+                    <div className="flex items-end gap-2 mt-2">
+                      <span className="text-[40px] font-bold text-white leading-[1.25] py-0.5">{data.points}</span>
+                      <span className="text-[15px] text-[#8E8E93] font-medium pb-2.5">{t('ref.points')}</span>
                     </div>
                   </div>
                 </div>
@@ -596,7 +596,6 @@ const ReferralPage = ({
                     <Users2 className="w-4.5 h-4.5 text-[#4DA6FF]" />
                   </div>
                   <span className="flex-1 text-[14.5px] text-white/90 leading-snug">{t('ref.rule1')}</span>
-                  <span className="text-[12px] font-medium text-[#8E8E93] shrink-0">{t('ref.rule1sub')}</span>
                 </div>
                 <div className="flex items-center gap-3.5">
                   <div className="w-9 h-9 glass-inner rounded-full flex items-center justify-center shrink-0">

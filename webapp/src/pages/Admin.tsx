@@ -54,11 +54,19 @@ const Section = ({ title, children }: { title?: string; children: React.ReactNod
 );
 
 const Card = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <div className={cn('glass rounded-[28px] overflow-hidden', className)}>{children}</div>
+  <div className={cn('glass rounded-[32px] overflow-hidden', className)}>{children}</div>
 );
 
 const Row = ({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) => (
   <div className="flex justify-between items-center px-5 py-4 border-b border-white/[0.06] last:border-b-0">
+    <div className="text-[15px] text-white/85">{label}</div>
+    <div className={cn('text-[16px] font-semibold', accent || 'text-white')}>{value}</div>
+  </div>
+);
+
+// Отдельная карточка-строка (как блоки в пользовательском интерфейсе)
+const RowCard = ({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) => (
+  <div className="ios-list flex justify-between items-center px-5 py-4">
     <div className="text-[15px] text-white/85">{label}</div>
     <div className={cn('text-[16px] font-semibold', accent || 'text-white')}>{value}</div>
   </div>
@@ -74,7 +82,7 @@ const IconChip = ({ icon: Icon, tint }: { icon: React.ElementType; tint: string 
 );
 
 const Spinner = () => (
-  <div className="glass rounded-[28px] p-8 flex justify-center">
+  <div className="glass rounded-[32px] p-8 flex justify-center">
     <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full"></div>
   </div>
 );
@@ -143,22 +151,25 @@ const CopyCode = ({ value, className }: { value: string; className?: string }) =
 function useAsyncData<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
-  const reload = useCallback(async () => {
-    setLoading(true);
+  // silent=true — фоновое обновление: без спиннера и без алерта ошибки,
+  // данные тихо подменяются на месте (пользователь ничего не замечает).
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       setData(await loader());
     } catch (e: any) {
-      tg.showAlert(e.message || 'Ошибка загрузки');
+      if (!silent) tg.showAlert(e.message || 'Ошибка загрузки');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
+  const reload = useCallback(() => load(false), [load]);
   useEffect(() => {
-    reload();
-  }, [reload]);
-  // Свежие данные при возврате в приложение (без ручной перезагрузки).
-  useAutoRefresh(reload);
+    load(false);
+  }, [load]);
+  // Тихое фоновое обновление при возврате в приложение и по интервалу.
+  useAutoRefresh(() => load(true));
   return { data, loading, reload };
 }
 
@@ -439,7 +450,7 @@ function OverviewPage() {
       {/* Плитки-метрики */}
       <div className="grid grid-cols-2 gap-3">
         {tiles.map((t) => (
-          <div key={t.label} className="glass rounded-[28px] p-4">
+          <div key={t.label} className="glass rounded-[32px] p-4">
             <IconChip icon={t.icon} tint={t.tint} />
             <div className="text-[26px] font-bold tracking-tight leading-none mt-3">{t.value}</div>
             <div className="text-[13px] text-white/85 font-medium mt-1.5">{t.label}</div>
@@ -561,36 +572,37 @@ function OverviewPage() {
 
       {/* Последние платежи */}
       <Section title="Последние платежи">
-        <Card>
-          {stats.recent_payments.length === 0 && (
-            <div className="text-center text-[#8E8E93] py-5 text-[15px]">Нет недавних платежей</div>
-          )}
-          {(stats.recent_payments as any[]).map((p, i) => (
-            <div key={i} className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.06] last:border-b-0">
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    'w-9 h-9 rounded-full flex items-center justify-center app-icon',
-                    p.method === 'crypto'
-                      ? 'bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 text-[#BF5AF2]'
-                      : 'bg-gradient-to-b from-[#0A84FF]/50 to-[#0A84FF]/15 text-[#4DA6FF]',
-                  )}
-                >
-                  {p.method === 'crypto' ? <Wallet className="w-4 h-4" /> : <Star className="w-4 h-4" />}
-                </div>
-                <div>
-                  <CopyCode value={String(p.user_id)} className="text-[14px] text-white" />
-                  <div className="text-[12px] text-[#8E8E93]">
-                    {p.created_at
-                      ? new Date(p.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-                      : ''}
+        {stats.recent_payments.length === 0 ? (
+          <Card className="text-center text-[#8E8E93] py-5 text-[15px]">Нет недавних платежей</Card>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {(stats.recent_payments as any[]).map((p, i) => (
+              <div key={i} className="ios-list flex items-center justify-between px-5 py-3.5">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      'w-9 h-9 rounded-full flex items-center justify-center app-icon',
+                      p.method === 'crypto'
+                        ? 'bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 text-[#BF5AF2]'
+                        : 'bg-gradient-to-b from-[#0A84FF]/50 to-[#0A84FF]/15 text-[#4DA6FF]',
+                    )}
+                  >
+                    {p.method === 'crypto' ? <Wallet className="w-4 h-4" /> : <Star className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <CopyCode value={String(p.user_id)} className="text-[14px] text-white" />
+                    <div className="text-[12px] text-[#8E8E93]">
+                      {p.created_at
+                        ? new Date(p.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                        : ''}
+                    </div>
                   </div>
                 </div>
+                <div className="text-[15px] font-semibold text-[#32D74B]">+₽{p.amount_rub || 0}</div>
               </div>
-              <div className="text-[15px] font-semibold text-[#32D74B]">+₽{p.amount_rub || 0}</div>
-            </div>
-          ))}
-        </Card>
+            ))}
+          </div>
+        )}
       </Section>
     </div>
   );
@@ -646,9 +658,9 @@ function TariffsTab() {
         {tarLoading || !tariffs ? (
           <Spinner />
         ) : (
-          <Card>
+          <div className="flex flex-col gap-2.5">
             {tariffs.map((t: Tariff) => (
-              <div key={t.months} className="flex items-center gap-3.5 px-5 py-4 border-b border-white/[0.06] last:border-b-0">
+              <div key={t.months} className="ios-list flex items-center gap-3.5 px-5 py-4">
                 <IconChip icon={CreditCard} tint="#32D74B" />
                 <div className="flex-1">
                   <div className="text-[16px] font-semibold text-white">{t.label}</div>
@@ -662,7 +674,7 @@ function TariffsTab() {
                 </div>
               </div>
             ))}
-          </Card>
+          </div>
         )}
       </Section>
 
@@ -769,11 +781,12 @@ function PromoTab() {
       <Section title="Последние ключи">
         {loading ? (
           <Spinner />
+        ) : (keys || []).length === 0 ? (
+          <Card className="text-[#8E8E93] text-[15px] py-5 text-center">Ключей пока нет</Card>
         ) : (
-          <Card>
-            {(keys || []).length === 0 && <div className="text-[#8E8E93] text-[15px] py-5 text-center">Ключей пока нет</div>}
+          <div className="flex flex-col gap-2.5">
             {(keys || []).map((k: any, i: number) => (
-              <div key={i} className="flex justify-between items-center gap-2 px-5 py-4 border-b border-white/[0.06] last:border-b-0">
+              <div key={i} className="ios-list flex justify-between items-center gap-2 px-5 py-4">
                 <CopyCode value={k.code} />
                 <div className="text-right shrink-0">
                   <div className="text-[13px] text-white/60">{k.label}</div>
@@ -783,7 +796,7 @@ function PromoTab() {
                 </div>
               </div>
             ))}
-          </Card>
+          </div>
         )}
       </Section>
     </div>
@@ -810,18 +823,18 @@ function StarsTab() {
         <div className="text-[13px] text-white/60 mt-3">Заморожено (до 21 дня): ⭐ {bal.frozen}</div>
       </div>
       <Section title="Telegram API">
-        <Card>
-          <Row label="Всего заработано" value={`${bal.total} ⭐`} />
-          <Row label="Выведено / списано" value={`${bal.outgoing_total} ⭐`} />
-          <Row label="Входящих транзакций" value={bal.incoming_count} />
-        </Card>
+        <div className="flex flex-col gap-2.5">
+          <RowCard label="Всего заработано" value={`${bal.total} ⭐`} />
+          <RowCard label="Выведено / списано" value={`${bal.outgoing_total} ⭐`} />
+          <RowCard label="Входящих транзакций" value={bal.incoming_count} />
+        </div>
       </Section>
       <Section title="По данным бота">
-        <Card>
-          <Row label="Оплат звёздами всего" value={bal.db_count} />
-          <Row label="В рублёвом эквиваленте" value={`₽ ${Math.round(bal.db_rub_total).toLocaleString('ru-RU')}`} accent="text-[#32D74B]" />
-          <Row label="За 30 дней" value={`${bal.db_count_30} шт · ₽${Math.round(bal.db_rub_30).toLocaleString('ru-RU')}`} />
-        </Card>
+        <div className="flex flex-col gap-2.5">
+          <RowCard label="Оплат звёздами всего" value={bal.db_count} />
+          <RowCard label="В рублёвом эквиваленте" value={`₽ ${Math.round(bal.db_rub_total).toLocaleString('ru-RU')}`} accent="text-[#32D74B]" />
+          <RowCard label="За 30 дней" value={`${bal.db_count_30} шт · ₽${Math.round(bal.db_rub_30).toLocaleString('ru-RU')}`} />
+        </div>
       </Section>
     </div>
   );
@@ -894,7 +907,7 @@ function TicketsTab() {
   const initial = (t: Ticket) => (t.username || t.full_name || String(t.user_id) || '?').replace('@', '').charAt(0).toUpperCase();
 
   const TicketCard = ({ t }: { t: Ticket }) => (
-    <div className="px-5 py-4 flex flex-col gap-2.5 border-b border-white/[0.06] last:border-b-0">
+    <div className="ios-list px-5 py-4 flex flex-col gap-2.5">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-full app-icon bg-gradient-to-b from-[#5E5CE6]/60 to-[#5E5CE6]/20 flex items-center justify-center text-[15px] font-bold text-white shrink-0">
           {initial(t)}
@@ -952,20 +965,23 @@ function TicketsTab() {
   return (
     <div className="flex flex-col gap-6">
       <Section title={`Открытые (${open.length})`}>
-        <Card>
-          {open.length === 0 && <div className="text-[#8E8E93] text-[15px] text-center py-6">Открытых обращений нет 🎉</div>}
-          {open.map((t: Ticket) => (
-            <TicketCard key={t.ticket_id} t={t} />
-          ))}
-        </Card>
+        {open.length === 0 ? (
+          <Card className="text-[#8E8E93] text-[15px] text-center py-6">Открытых обращений нет 🎉</Card>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {open.map((t: Ticket) => (
+              <TicketCard key={t.ticket_id} t={t} />
+            ))}
+          </div>
+        )}
       </Section>
       {closed.length > 0 && (
         <Section title="Закрытые">
-          <Card className="opacity-65">
+          <div className="flex flex-col gap-2.5 opacity-65">
             {closed.slice(0, 10).map((t: Ticket) => (
               <TicketCard key={t.ticket_id} t={t} />
             ))}
-          </Card>
+          </div>
         </Section>
       )}
 
@@ -1021,28 +1037,29 @@ function CountryTab() {
   return (
     <div className="flex flex-col gap-6">
       <Section title={`Открытые запросы (${(reqs || []).length})`}>
-        <Card>
-          {(reqs || []).length === 0 && (
-            <div className="text-[#8E8E93] text-[15px] text-center py-6">Нет открытых запросов</div>
-          )}
-          {(reqs || []).map((r: any) => (
-            <div key={r.request_id} className="px-5 py-4 flex justify-between items-center border-b border-white/[0.06] last:border-b-0">
-              <div>
-                <div className="text-[16px] font-medium text-white emoji-flag">{r.country}</div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <CopyCode value={String(r.user_id)} className="text-[12px] text-white/45" />
-                  <span className="text-[12px] text-white/35">{new Date(r.created_at).toLocaleDateString('ru-RU')}</span>
+        {(reqs || []).length === 0 ? (
+          <Card className="text-[#8E8E93] text-[15px] text-center py-6">Нет открытых запросов</Card>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {(reqs || []).map((r: any) => (
+              <div key={r.request_id} className="ios-list px-5 py-4 flex justify-between items-center">
+                <div>
+                  <div className="text-[16px] font-medium text-white emoji-flag">{r.country}</div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <CopyCode value={String(r.user_id)} className="text-[12px] text-white/45" />
+                    <span className="text-[12px] text-white/35">{new Date(r.created_at).toLocaleDateString('ru-RU')}</span>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setReplyFor(r)}
+                  className="px-4 py-1.5 btn-primary rounded-full text-white text-[13px] font-semibold active:scale-95 transition-transform"
+                >
+                  Ответить
+                </button>
               </div>
-              <button
-                onClick={() => setReplyFor(r)}
-                className="px-4 py-1.5 btn-primary rounded-full text-white text-[13px] font-semibold active:scale-95 transition-transform"
-              >
-                Ответить
-              </button>
-            </div>
-          ))}
-        </Card>
+            ))}
+          </div>
+        )}
       </Section>
 
       {replyFor && (
@@ -1271,9 +1288,9 @@ function UsersTab() {
         className="w-full glass rounded-full px-5 py-3.5 text-[15px] text-white placeholder:text-white/30 focus:outline-none"
       />
       <Section title={`Пользователи (${filtered.length})`}>
-        <Card>
+        <div className="flex flex-col gap-2.5">
           {filtered.map((u: any) => (
-            <div key={u.user_id} className="px-5 py-4 flex justify-between items-center border-b border-white/[0.06] last:border-b-0">
+            <div key={u.user_id} className="ios-list px-5 py-4 flex justify-between items-center">
               <button onClick={() => { hapticFeedback.selectionChanged(); setDetailId(u.user_id); }} className="min-w-0 text-left flex-1 active:opacity-60">
                 <div className="text-[15px] font-medium text-white truncate">
                   {u.username ? `@${u.username}` : u.full_name || u.user_id}
@@ -1296,7 +1313,7 @@ function UsersTab() {
               </div>
             </div>
           ))}
-        </Card>
+        </div>
       </Section>
 
       {detailId !== null && (
