@@ -122,9 +122,14 @@ const dict: Dict = {
   'ref.title': { ru: 'Партнёрская программа', en: 'Referral program' },
   'ref.balance': { ru: 'Ваши баллы', en: 'Your points' },
   'ref.how': { ru: 'Как это работает', en: 'How it works' },
-  'ref.rule1': { ru: 'Друг запустил бота по вашей ссылке', en: 'A friend starts the bot via your link' },
-  'ref.rule2': { ru: 'Друг оформил первую покупку', en: 'Your friend makes their first purchase' },
+  'ref.rule1': { ru: 'Пригласите друга по своей ссылке', en: 'Invite a friend with your link' },
+  'ref.rule1sub': { ru: 'без баллов', en: 'no points' },
+  'ref.rule2': { ru: 'Друг оформил первую подписку', en: 'Friend buys their first subscription' },
   'ref.rule3': { ru: 'месяц VPN бесплатно', en: 'month of VPN for free' },
+  'ref.onlyPaid': {
+    ru: 'Баллы начисляются только после того, как приглашённый друг оплатит подписку.',
+    en: 'Points are credited only after your invited friend pays for a subscription.',
+  },
   'ref.yourLink': { ru: 'Ваша ссылка', en: 'Your link' },
   'ref.share': { ru: 'Поделиться ссылкой', en: 'Share link' },
   'ref.shareText': {

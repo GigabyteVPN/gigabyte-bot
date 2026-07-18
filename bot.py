@@ -74,12 +74,13 @@ OFFER_URL: str = "https://telegra.ph/PUBLICHNAYA-OFERTA-Dogovor-na-okazanie-uslu
 PRIVACY_URL: str = "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-07-01-51"
 
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
-# Экономика баллов: приглашённый запустил бота → рефереру +REF_POINTS_SIGNUP;
-# приглашённый впервые оплатил → рефереру +REF_POINTS_PURCHASE (ускоритель).
+# Баллы начисляются ТОЛЬКО когда приглашённый друг оплатил подписку
+# (+REF_POINTS_PURCHASE за его первую покупку). Просто за запуск бота по
+# ссылке баллы НЕ даём (REF_POINTS_SIGNUP = 0) — только связываем реферала.
 # REF_REDEEM_COST баллов = REF_REDEEM_MONTHS месяц(ев) VPN, то есть
-# 5 приглашённых друзей (5 × 20 = 100) = 1 месяц бесплатно.
-REF_POINTS_SIGNUP: int = 20
-REF_POINTS_PURCHASE: int = 50
+# 5 оплативших друзей (5 × 20 = 100) = 1 месяц бесплатно.
+REF_POINTS_SIGNUP: int = 0
+REF_POINTS_PURCHASE: int = 20
 REF_REDEEM_COST: int = 100
 REF_REDEEM_MONTHS: int = 1
 
@@ -544,6 +545,58 @@ async def load_servers_from_supabase() -> List[Dict]:
         logger.error(f"❌ Ошибка загрузки серверов: {e}")
         return []
 
+async def load_all_servers_from_supabase() -> List[Dict]:
+    """ВСЕ серверы, включая отключённые (is_active=False). Нужно при отзыве
+    доступа: клиента надо снять с панели, даже если сервер деактивирован."""
+    await init_supabase()
+    try:
+        res = await supabase.table("servers").select("*").execute()
+        return res.data
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки всех серверов: {e}")
+        return []
+
+async def revoke_user_clients(user_id: int) -> Dict[str, Any]:
+    """Снимает ВСЕ подписки пользователя с панелей 3x-ui, чтобы и
+    ссылка-подписка, и сам VPN перестали работать немедленно.
+
+    Возвращает {"removed": n, "failures": [ {sub_id, email, server}, … ]}.
+    Клиент, которого «уже нет» в панели, считается успешно снятым."""
+    subs = await supabase.table("subscriptions").select(
+        "sub_id, client_uuid, email, server_id").eq("user_id", user_id).execute()
+    servers = await load_all_servers_from_supabase()
+    server_map = {s["id"]: s for s in servers}
+    removed = 0
+    failures: List[Dict[str, Any]] = []
+    for sub in subs.data or []:
+        server = server_map.get(sub["server_id"])
+        if not server:
+            # Сервера уже нет в БД — клиента снять неоткуда, но и доступа нет.
+            removed += 1
+            continue
+        xui = XUIApi(server)
+        try:
+            if await xui.remove_client(sub["client_uuid"]):
+                removed += 1
+            else:
+                failures.append({
+                    "sub_id": sub.get("sub_id"),
+                    "email": sub.get("email"),
+                    "client_uuid": sub.get("client_uuid"),
+                    "server": server.get("name"),
+                })
+        except Exception as e:
+            logger.error(f"Ошибка отзыва клиента {sub.get('client_uuid')}: {e}")
+            failures.append({
+                "sub_id": sub.get("sub_id"),
+                "email": sub.get("email"),
+                "client_uuid": sub.get("client_uuid"),
+                "server": server.get("name"),
+            })
+        finally:
+            await xui.close()
+    return {"removed": removed, "failures": failures}
+
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА: ЛОГИКА ======================
 # Все операции устойчивы к отсутствию таблицы point_transactions и колонок
 # users.referred_by/ref_points: до применения миграции функции тихо
@@ -639,26 +692,28 @@ async def handle_referral_start(user_id: int, payload: str, is_new_user: bool):
         ref_row = await supabase.table("users").select("user_id").eq("user_id", referrer_id).execute()
         if not ref_row.data:
             return
+        # Связываем реферала, но баллы НЕ начисляем — только когда друг оплатит.
         await supabase.table("users").update({"referred_by": referrer_id}).eq("user_id", user_id).execute()
-        if await award_points(referrer_id, REF_POINTS_SIGNUP, "referral_signup", ref_user_id=user_id):
-            lang = await get_user_lang(referrer_id)
-            if lang == "en":
-                text = (
-                    f"🎉 <b>+{REF_POINTS_SIGNUP} points!</b>\n\n"
-                    f"Your friend just joined Gigabyte via your link.\n"
-                    f"You'll get <b>+{REF_POINTS_PURCHASE}</b> more when they make their first purchase."
-                )
-            else:
-                text = (
-                    f"🎉 <b>+{REF_POINTS_SIGNUP} баллов!</b>\n\n"
-                    f"По вашей ссылке присоединился новый пользователь.\n"
-                    f"Когда он оформит первую покупку, вы получите ещё <b>+{REF_POINTS_PURCHASE}</b>."
-                )
-            try:
-                await bot.send_message(referrer_id, text, parse_mode=ParseMode.HTML)
-            except Exception:
-                pass
-            logger.info(f"🤝 Реферал: {user_id} приглашён {referrer_id} (+{REF_POINTS_SIGNUP})")
+        lang = await get_user_lang(referrer_id)
+        if lang == "en":
+            text = (
+                f"🤝 <b>A friend joined via your link!</b>\n\n"
+                f"You'll earn <b>+{REF_POINTS_PURCHASE} points</b> as soon as they buy their "
+                f"first subscription. {REF_REDEEM_COST} points = "
+                f"{REF_REDEEM_MONTHS} month of VPN for free."
+            )
+        else:
+            text = (
+                f"🤝 <b>По вашей ссылке пришёл друг!</b>\n\n"
+                f"Вы получите <b>+{REF_POINTS_PURCHASE} баллов</b>, как только он оформит "
+                f"первую подписку. {REF_REDEEM_COST} баллов = "
+                f"{REF_REDEEM_MONTHS} месяц VPN бесплатно."
+            )
+        try:
+            await bot.send_message(referrer_id, text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+        logger.info(f"🤝 Реферал привязан: {user_id} приглашён {referrer_id}")
     except Exception as e:
         logger.error(f"Ошибка обработки реферала {user_id}<-{referrer_id}: {e}")
 

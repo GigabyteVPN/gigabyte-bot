@@ -212,6 +212,37 @@ export const api = {
       ),
     panelStatus: () => request<any>('GET', '/api/admin/panel-status'),
     users: (limit = 100) => request<any[]>('GET', `/api/admin/users?limit=${limit}`),
+    userDetail: (userId: number) => request<AdminUserDetail>('GET', `/api/admin/users/${userId}`),
     deleteUser: (userId: number) => request('DELETE', `/api/admin/users/${userId}`),
+    revokeSub: (subId: string) => request<{ revoked: boolean }>('POST', `/api/admin/subscriptions/${subId}/revoke`, {}),
   },
+};
+
+export type AdminUserDetail = {
+  user: {
+    user_id: number;
+    username?: string;
+    full_name?: string;
+    created_at?: string;
+    lang?: string;
+    reminders_enabled?: boolean;
+    is_admin: boolean;
+  };
+  subscriptions: {
+    sub_id: string;
+    server: ServerInfo;
+    expiry_date: number;
+    status: 'active' | 'expired';
+    email?: string;
+  }[];
+  payments: {
+    payment_uid?: string;
+    amount_rub?: number;
+    method?: string;
+    status?: string;
+    created_at?: string;
+    tx_hash?: string;
+  }[];
+  total_paid: number;
+  referral: { points: number; invited_total: number; invited_paid: number; referred_by?: number | null };
 };

@@ -4,6 +4,7 @@ import { api, Ticket, Tariff } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback } from '../lib/telegram';
 import { cn, formatBytes } from '../lib/utils';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { motion } from 'motion/react';
 import { BottomNav, NavTab } from '../components/layout/BottomNav';
 import {
@@ -156,6 +157,8 @@ function useAsyncData<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   useEffect(() => {
     reload();
   }, [reload]);
+  // Свежие данные при возврате в приложение (без ручной перезагрузки).
+  useAutoRefresh(reload);
   return { data, loading, reload };
 }
 
@@ -1092,11 +1095,146 @@ function SupportPage() {
 //  КЛИЕНТЫ: пользователи / выдача / рассылка
 // ============================================================
 
+// Детальная карточка пользователя: реальные подписки, платежи, рефералы.
+// Позволяет отозвать доступ по конкретной подписке (снять с панели).
+function UserDetailSheet({ userId, onClose, onChanged }: { userId: number; onClose: () => void; onChanged: () => void }) {
+  const { data, loading, reload } = useAsyncData(() => api.admin.userDetail(userId), [userId]);
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const revoke = async (subId: string) => {
+    if (revoking) return;
+    setRevoking(subId);
+    try {
+      await api.admin.revokeSub(subId);
+      hapticFeedback.notificationOccurred('success');
+      tg.showAlert('⛔️ Доступ отозван: клиент снят с панели.');
+      reload();
+      onChanged();
+    } catch (e: any) {
+      hapticFeedback.notificationOccurred('error');
+      tg.showAlert(e.message || 'Ошибка');
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  const fmtDate = (iso?: string) =>
+    iso ? new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const fmtExpiry = (ms: number) =>
+    ms === 0 ? '∞' : new Date(ms).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  return (
+    <Sheet onClose={onClose}>
+      {loading || !data ? (
+        <div className="flex justify-center py-10">
+          <div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-white rounded-full" />
+        </div>
+      ) : (
+        <div className="max-h-[72vh] overflow-y-auto hidden-scrollbar flex flex-col gap-5">
+          {/* Шапка */}
+          <div>
+            <div className="text-[20px] font-bold text-white">
+              {data.user.username ? `@${data.user.username}` : data.user.full_name || data.user.user_id}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <CopyCode value={String(data.user.user_id)} className="text-[13px] text-white/50" />
+              <span className="text-[12px] text-white/40">· с {fmtDate(data.user.created_at)}</span>
+            </div>
+          </div>
+
+          {/* Быстрые метрики */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {[
+              ['Оплачено', `₽${Math.round(data.total_paid)}`],
+              ['Баллы', String(data.referral.points)],
+              ['Пригласил', String(data.referral.invited_total)],
+            ].map(([label, value]) => (
+              <div key={label} className="glass-inner rounded-2xl py-3 px-2 text-center">
+                <div className="text-[17px] font-bold text-white leading-none">{value}</div>
+                <div className="text-[10.5px] text-white/45 uppercase tracking-wider mt-1.5">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Подписки */}
+          <div>
+            <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-2 ml-1">
+              Подписки ({data.subscriptions.length})
+            </div>
+            {data.subscriptions.length === 0 ? (
+              <div className="text-[14px] text-white/40 px-1">Нет подписок</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {data.subscriptions.map((s) => {
+                  const active = s.status === 'active';
+                  return (
+                    <div key={s.sub_id} className="glass-inner rounded-2xl p-3.5 flex items-center gap-3">
+                      <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', active ? 'bg-[#32D74B]' : 'bg-[#8E8E93]')} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[15px] font-semibold text-white truncate emoji-flag">
+                          {s.server.flag} {s.server.name}
+                        </div>
+                        <div className="text-[12px] text-white/45">
+                          {active ? `до ${fmtExpiry(s.expiry_date)}` : 'истекла / отозвана'}
+                        </div>
+                      </div>
+                      {active && (
+                        <button
+                          onClick={() => revoke(s.sub_id)}
+                          disabled={revoking === s.sub_id}
+                          className="px-3 h-8 rounded-full bg-[#FF453A]/15 text-[#FF6961] text-[13px] font-semibold flex items-center gap-1.5 active:scale-95 transition-transform disabled:opacity-50 shrink-0"
+                        >
+                          {revoking === s.sub_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Отозвать'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Платежи */}
+          <div>
+            <div className="text-[13px] uppercase tracking-wide text-[#8E8E93] font-semibold mb-2 ml-1">
+              Платежи ({data.payments.length})
+            </div>
+            {data.payments.length === 0 ? (
+              <div className="text-[14px] text-white/40 px-1">Платежей нет</div>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {data.payments.slice(0, 12).map((p, i) => (
+                  <div key={i} className="flex items-center justify-between px-1 py-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={cn(
+                          'w-1.5 h-1.5 rounded-full shrink-0',
+                          p.status === 'completed' ? 'bg-[#32D74B]' : p.status === 'expired' ? 'bg-[#FF453A]' : 'bg-[#FF9F0A]',
+                        )}
+                      />
+                      <span className="text-[13px] text-white/70 truncate">
+                        {p.method === 'stars' ? 'Stars' : p.method === 'crypto' ? 'Крипто' : p.method === 'trial' ? 'Триал' : p.method}
+                      </span>
+                      <span className="text-[12px] text-white/35">{fmtDate(p.created_at)}</span>
+                    </div>
+                    <span className="text-[13px] font-semibold text-white shrink-0">₽{p.amount_rub || 0}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function UsersTab() {
   const { data: users, loading, reload } = useAsyncData(() => api.admin.users(200));
   const [confirm, setConfirm] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const remove = async () => {
     if (!confirm || busy) return;
@@ -1136,29 +1274,34 @@ function UsersTab() {
         <Card>
           {filtered.map((u: any) => (
             <div key={u.user_id} className="px-5 py-4 flex justify-between items-center border-b border-white/[0.06] last:border-b-0">
-              <div className="min-w-0">
+              <button onClick={() => { hapticFeedback.selectionChanged(); setDetailId(u.user_id); }} className="min-w-0 text-left flex-1 active:opacity-60">
                 <div className="text-[15px] font-medium text-white truncate">
                   {u.username ? `@${u.username}` : u.full_name || u.user_id}
                   {u.is_admin && <span className="text-[10px] text-[#FF9F0A] font-bold ml-2 bg-[#FF9F0A]/15 px-2 py-0.5 rounded-full">ADMIN</span>}
                 </div>
-                {/* ID копируется одним касанием */}
-                <CopyCode value={String(u.user_id)} className="text-[12px] text-white/45" />
+                <div className="text-[12px] text-white/45 font-mono mt-0.5">{u.user_id}</div>
                 <div className="text-[13px] text-white/55 mt-0.5">
                   Подписок: {u.active_subs} · Оплачено: ₽{Math.round(u.total_paid)}
                 </div>
+              </button>
+              <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                {!u.is_admin && (
+                  <button
+                    onClick={() => setConfirm(u)}
+                    className="w-9 h-9 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                  >
+                    <Trash2 className="w-4 h-4 text-[#FF6961]" />
+                  </button>
+                )}
               </div>
-              {!u.is_admin && (
-                <button
-                  onClick={() => setConfirm(u)}
-                  className="w-9 h-9 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform shrink-0 ml-3"
-                >
-                  <Trash2 className="w-4 h-4 text-[#FF6961]" />
-                </button>
-              )}
             </div>
           ))}
         </Card>
       </Section>
+
+      {detailId !== null && (
+        <UserDetailSheet userId={detailId} onClose={() => setDetailId(null)} onChanged={reload} />
+      )}
 
       {confirm && (
         <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 backdrop-blur-md px-6" onClick={() => setConfirm(null)}>

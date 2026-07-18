@@ -115,6 +115,36 @@ def safe_server(s: dict) -> dict:
     }
 
 
+def _flags_in(text: str) -> set:
+    """Все флаг-эмодзи (пары regional indicator) в строке."""
+    import re
+    return set(re.findall(r"[\U0001F1E6-\U0001F1FF]{2}", text or ""))
+
+
+def available_countries(servers: List[dict]) -> List[str]:
+    """Список стран для запроса новых локаций БЕЗ тех, что уже подключены.
+
+    Исключаем страну, если её флаг или название совпадает с активным
+    сервером (напр. «🇫🇷 Франция», «🇫🇮 Финляндия» уже есть в VPN)."""
+    taken_flags: set = set()
+    taken_names: set = set()
+    for s in servers:
+        blob = f"{s.get('name', '')} {s.get('flag', '')}"
+        taken_flags |= _flags_in(blob)
+        for word in (s.get("name") or "").split():
+            w = word.strip().lower()
+            if len(w) >= 4 and not _flags_in(word):
+                taken_names.add(w)
+    out = []
+    for c in B.COUNTRIES:
+        flags = _flags_in(c)
+        name_words = {w.strip().lower() for w in c.split() if not _flags_in(w)}
+        if flags & taken_flags or name_words & taken_names:
+            continue
+        out.append(c)
+    return out
+
+
 def tariff_list() -> List[dict]:
     return sorted(
         (
@@ -213,6 +243,10 @@ async def cors_middleware(request: web.Request, handler):
         raise
     for k, v in CORS_HEADERS.items():
         response.headers[k] = v
+    # API-ответы не кешируем: Telegram WebView иначе показывает устаревшие
+    # данные (напр. статус подписки не меняется до перезапуска приложения).
+    if request.path.startswith("/api/") and not request.path.startswith("/api/public/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
 
@@ -294,7 +328,7 @@ async def api_bootstrap(request: web.Request) -> web.Response:
         "trial_used": bool(trial_res.data),
         "tariffs": tariff_list(),
         "servers": [safe_server(s) for s in servers],
-        "countries": B.COUNTRIES,
+        "countries": available_countries(servers),
         "wallet": B.ARBITRUM_WALLET,
         "contracts": {"USDT": B.USDT_CONTRACT, "USDC": B.USDC_CONTRACT},
         "offer_url": B.OFFER_URL,
@@ -878,33 +912,52 @@ async def api_country_request(request: web.Request) -> web.Response:
     return ok({"request_id": request_id})
 
 
+async def _purge_user_data(user_id: int) -> None:
+    """Полностью удаляет все данные пользователя из БД (после отзыва доступа)."""
+    for table in ("subscriptions", "payments", "tickets", "ticket_messages",
+                  "country_requests", "pending_confirmations", "point_transactions",
+                  "users"):
+        try:
+            await B.supabase.table(table).delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"purge {table} for {user_id}: {e}")
+    # Отвязываем тех, кого этот пользователь пригласил (реферер удалён).
+    try:
+        await B.supabase.table("users").update({"referred_by": None}).eq(
+            "referred_by", user_id).execute()
+    except Exception:
+        pass
+
+
 async def api_delete_account(request: web.Request) -> web.Response:
     user_id = request["user_id"]
     if B.is_admin(user_id):
         return err("Администратор не может удалить себя")
 
-    subs = await B.supabase.table("subscriptions").select("client_uuid, server_id").eq("user_id", user_id).execute()
-    servers = await B.load_servers_from_supabase()
-    server_map = {s["id"]: s for s in servers}
-    deleted_count = 0
-    for sub in subs.data or []:
-        server = server_map.get(sub["server_id"])
-        if server:
-            xui = B.XUIApi(server)
-            try:
-                if await xui.remove_client(sub["client_uuid"]):
-                    deleted_count += 1
-            finally:
-                await xui.close()
+    # Сначала гарантированно снимаем доступ (ссылка-подписка и VPN),
+    # и только при полном успехе стираем данные. Если панель недоступна —
+    # НЕ удаляем записи (иначе потеряем client_uuid и не сможем отозвать
+    # доступ), уведомляем админа и просим повторить.
+    result = await B.revoke_user_clients(user_id)
+    if result["failures"]:
+        details = "\n".join(
+            f"• {f['server']}: <code>{B.esc(f['email'])}</code> ({B.esc(f['client_uuid'])})"
+            for f in result["failures"]
+        )
+        await notify_admins(
+            f"⚠️ <b>Не удалось отозвать доступ при удалении аккаунта</b>\n\n"
+            f"🆔 <code>{user_id}</code>\nПроблемные клиенты (снимите вручную в панели):\n{details}"
+        )
+        return err(
+            "Не удалось полностью отключить доступ (панель временно недоступна). "
+            "Данные НЕ удалены. Попробуйте ещё раз через минуту.", 503)
 
-    for table in ("subscriptions", "payments", "tickets", "country_requests", "pending_confirmations", "users"):
-        await B.supabase.table(table).delete().eq("user_id", user_id).execute()
-
+    await _purge_user_data(user_id)
     await notify_admins(
         f"ℹ️ <b>Пользователь удалил аккаунт</b> (через веб-апп)\n\n"
-        f"🆔 <code>{user_id}</code>\n📊 Удалено подписок: {deleted_count}"
+        f"🆔 <code>{user_id}</code>\n📊 Отозвано подписок: {result['removed']}"
     )
-    return ok({"deleted_subscriptions": deleted_count})
+    return ok({"deleted_subscriptions": result["removed"]})
 
 
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
@@ -1719,6 +1772,107 @@ async def api_admin_users(request: web.Request) -> web.Response:
     return ok(result)
 
 
+async def api_admin_user_detail(request: web.Request) -> web.Response:
+    """Детальная карточка пользователя для админки: реальные подписки
+    (статус/срок/сервер), платежи и реферальная сводка."""
+    uid_str = request.match_info["user_id"]
+    if not uid_str.isdigit():
+        return err("Неверный ID")
+    uid = int(uid_str)
+
+    urow = await B.supabase.table("users").select("*").eq("user_id", uid).execute()
+    if not urow.data:
+        return err("Пользователь не найден", 404)
+    user = urow.data[0]
+
+    servers = await B.load_servers_from_supabase()
+    server_map = {s["id"]: s for s in servers}
+    now_ms = int(time.time() * 1000)
+
+    subs_res = await B.supabase.table("subscriptions").select(
+        "id, sub_id, server_id, expiry_date, status, email").eq("user_id", uid).execute()
+    subs = []
+    for s in sorted(subs_res.data or [], key=lambda x: x.get("expiry_date") or 0, reverse=True):
+        server = server_map.get(s["server_id"])
+        expiry = s.get("expiry_date") or 0
+        is_active = s.get("status") == "active" and (expiry == 0 or expiry > now_ms)
+        subs.append({
+            "sub_id": s["sub_id"],
+            "server": safe_server(server) if server else {"id": s["server_id"], "name": "—"},
+            "expiry_date": expiry,
+            "status": "active" if is_active else "expired",
+            "email": s.get("email"),
+        })
+
+    pays_res = await B.supabase.table("payments").select(
+        "payment_uid, amount_rub, method, status, created_at, tx_hash").eq(
+        "user_id", uid).order("created_at", desc=True).limit(30).execute()
+
+    referral = {"points": 0, "invited_total": 0, "invited_paid": 0, "referred_by": user.get("referred_by")}
+    if await B.referral_schema_available():
+        try:
+            referral["points"] = int(user.get("ref_points") or 0)
+            inv = await B.supabase.table("users").select("user_id", count="exact").eq(
+                "referred_by", uid).execute()
+            referral["invited_total"] = inv.count or 0
+            paid = await B.supabase.table("point_transactions").select("id", count="exact").eq(
+                "user_id", uid).eq("reason", "referral_purchase").execute()
+            referral["invited_paid"] = paid.count or 0
+        except Exception:
+            pass
+
+    total_paid = sum((p.get("amount_rub") or 0) for p in (pays_res.data or [])
+                     if p.get("status") == "completed")
+
+    return ok({
+        "user": {
+            "user_id": uid,
+            "username": user.get("username"),
+            "full_name": user.get("full_name"),
+            "created_at": user.get("created_at"),
+            "lang": user.get("lang"),
+            "reminders_enabled": user.get("reminders_enabled"),
+            "is_admin": B.is_admin(uid),
+        },
+        "subscriptions": subs,
+        "payments": pays_res.data or [],
+        "total_paid": total_paid,
+        "referral": referral,
+    })
+
+
+async def api_admin_revoke_sub(request: web.Request) -> web.Response:
+    """Отзыв одной подписки: снимаем клиента с панели (ссылка и VPN
+    перестают работать) и помечаем подписку в БД как revoked."""
+    sub_id = request.match_info["sub_id"]
+    res = await B.supabase.table("subscriptions").select(
+        "client_uuid, server_id, user_id").eq("sub_id", sub_id).execute()
+    if not res.data:
+        return err("Подписка не найдена", 404)
+    sub = res.data[0]
+    servers = await B.load_all_servers_from_supabase()
+    server = next((s for s in servers if s["id"] == sub["server_id"]), None)
+    if server:
+        xui = B.XUIApi(server)
+        try:
+            removed = await xui.remove_client(sub["client_uuid"])
+        finally:
+            await xui.close()
+        if not removed:
+            return err("Панель недоступна — доступ не отозван. Попробуйте ещё раз.", 503)
+    await B.supabase.table("subscriptions").update({"status": "revoked"}).eq("sub_id", sub_id).execute()
+    try:
+        await B.bot.send_message(
+            sub["user_id"],
+            "⛔️ <b>Ваша подписка была отключена администратором.</b>\n\n"
+            "Если это ошибка — напишите в поддержку.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    return ok({"revoked": True})
+
+
 async def api_admin_delete_user(request: web.Request) -> web.Response:
     uid_str = request.match_info["user_id"]
     if not uid_str.isdigit():
@@ -1726,22 +1880,19 @@ async def api_admin_delete_user(request: web.Request) -> web.Response:
     uid = int(uid_str)
     if B.is_admin(uid):
         return err("Нельзя удалить администратора")
-    subs = await B.supabase.table("subscriptions").select("client_uuid, server_id").eq("user_id", uid).execute()
-    servers = await B.load_servers_from_supabase()
-    server_map = {s["id"]: s for s in servers}
-    deleted = 0
-    for sub in subs.data or []:
-        server = server_map.get(sub["server_id"])
-        if server:
-            xui = B.XUIApi(server)
-            try:
-                if await xui.remove_client(sub["client_uuid"]):
-                    deleted += 1
-            finally:
-                await xui.close()
-    for table in ("subscriptions", "payments", "tickets", "country_requests", "pending_confirmations", "users"):
-        await B.supabase.table(table).delete().eq("user_id", uid).execute()
-    return ok({"deleted_subscriptions": deleted})
+
+    result = await B.revoke_user_clients(uid)
+    if result["failures"]:
+        details = "\n".join(
+            f"• {f['server']}: {f['email']} ({f['client_uuid']})"
+            for f in result["failures"]
+        )
+        return err(
+            f"Доступ отозван не полностью — панель недоступна. Данные НЕ удалены. "
+            f"Снимите вручную и повторите:\n{details}", 503)
+
+    await _purge_user_data(uid)
+    return ok({"deleted_subscriptions": result["removed"]})
 
 
 # ====================== СТАТИКА ВЕБ-АППА ======================
@@ -1812,7 +1963,9 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/admin/servers/{server_id}/test", api_admin_server_test)
     r.add_get("/api/admin/panel-status", api_admin_panel_status)
     r.add_get("/api/admin/users", api_admin_users)
+    r.add_get("/api/admin/users/{user_id}", api_admin_user_detail)
     r.add_delete("/api/admin/users/{user_id}", api_admin_delete_user)
+    r.add_post("/api/admin/subscriptions/{sub_id}/revoke", api_admin_revoke_sub)
 
     # Статика собранного веб-аппа (webapp/dist) по адресу /app
     import os

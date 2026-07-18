@@ -35,6 +35,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { cn, formatBytes } from '../lib/utils';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -521,7 +522,7 @@ const ReferralPage = ({
         >
           <ChevronLeft className="w-6 h-6 text-white" />
         </button>
-        <h1 className="text-[22px] font-bold tracking-tight text-white leading-none">{t('ref.title')}</h1>
+        <SectionTitle className="mb-0 ml-0">{t('ref.title')}</SectionTitle>
       </div>
 
       <div className="overflow-y-auto hidden-scrollbar flex-1 px-4 pt-3 pb-16 flex flex-col gap-5">
@@ -532,19 +533,19 @@ const ReferralPage = ({
         ) : (
           <>
             {/* Баланс + прогресс до бесплатного месяца */}
-            <div className="ios-list p-6 relative overflow-hidden">
+            <div className="ios-list p-6 relative">
               <div className="absolute top-0 right-0 w-40 h-40 bg-[#BF5AF2]/15 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
               <div className="relative z-10 flex flex-col gap-5">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
                     <Gift className="w-7 h-7 text-[#D7A8FF]" />
                   </div>
-                  <div className="min-w-0">
+                  <div className="flex-1 min-w-0">
                     <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
                       {t('ref.balance')}
                     </div>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-[36px] font-bold text-white leading-none">{data.points}</span>
+                    <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
+                      <span className="text-[38px] font-bold text-white leading-[1.1]">{data.points}</span>
                       <span className="text-[15px] text-[#8E8E93] font-medium">{t('ref.points')}</span>
                     </div>
                   </div>
@@ -595,11 +596,11 @@ const ReferralPage = ({
                     <Users2 className="w-4.5 h-4.5 text-[#4DA6FF]" />
                   </div>
                   <span className="flex-1 text-[14.5px] text-white/90 leading-snug">{t('ref.rule1')}</span>
-                  <span className="text-[15px] font-bold text-[#32D74B] shrink-0">+{data.points_signup}</span>
+                  <span className="text-[12px] font-medium text-[#8E8E93] shrink-0">{t('ref.rule1sub')}</span>
                 </div>
                 <div className="flex items-center gap-3.5">
                   <div className="w-9 h-9 glass-inner rounded-full flex items-center justify-center shrink-0">
-                    <CreditCard className="w-4.5 h-4.5 text-[#4DA6FF]" />
+                    <CreditCard className="w-4.5 h-4.5 text-[#32D74B]" />
                   </div>
                   <span className="flex-1 text-[14.5px] text-white/90 leading-snug">{t('ref.rule2')}</span>
                   <span className="text-[15px] font-bold text-[#32D74B] shrink-0">+{data.points_purchase}</span>
@@ -611,6 +612,9 @@ const ReferralPage = ({
                   <span className="flex-1 text-[14.5px] text-white/90 leading-snug">
                     {data.redeem_cost} {t('ref.points')} = {data.redeem_months} {t('ref.rule3')}
                   </span>
+                </div>
+                <div className="flex items-start gap-2 pt-1 border-t border-white/[0.06] mt-1">
+                  <span className="text-[12px] text-[#8E8E93] leading-snug">{t('ref.onlyPaid')}</span>
                 </div>
               </div>
             </section>
@@ -746,7 +750,7 @@ const statusMeta = (p: Payment): { label: string; cls: string } => {
 };
 
 export default function Dashboard() {
-  const { boot } = useApp();
+  const { boot, refreshBoot } = useApp();
   const navigate = useNavigate();
   const [subs, setSubs] = useState<Subscription[]>([]);
   const [pending, setPending] = useState<Payment[]>([]);
@@ -779,6 +783,13 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Обновляем данные при возврате в приложение (Telegram не перемонтирует
+  // WebView), чтобы изменения статуса подписки появлялись сразу.
+  useAutoRefresh(() => {
+    fetchData();
+    refreshBoot();
+  });
 
   useEffect(() => {
     document.body.style.overflow = activeModal || qrSub || confirmDelete ? 'hidden' : '';
