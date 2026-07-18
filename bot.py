@@ -760,6 +760,149 @@ async def award_referral_purchase(payer_id: int, amount_rub: float, payment_id: 
     except Exception as e:
         logger.error(f"Ошибка начисления бонуса за покупку ({payer_id}): {e}")
 
+# ====================== ЗАЩИТА ОТ ПОВТОРНОГО ТРИАЛА ======================
+# Пробный период — один раз на Telegram-аккаунт НАВСЕГДА. Учёт в отдельной
+# таблице trial_claims, которая НЕ очищается при удалении аккаунта, поэтому
+# нельзя удалить аккаунт и снова взять бесплатную неделю. Если таблицы ещё
+# нет (миграция не применена) — откатываемся на старую проверку по payments.
+_trial_table_ok: Optional[bool] = None
+
+async def _trial_table_available() -> bool:
+    global _trial_table_ok
+    if _trial_table_ok is None:
+        try:
+            await supabase.table("trial_claims").select("user_id").limit(1).execute()
+            _trial_table_ok = True
+        except Exception:
+            _trial_table_ok = False
+            logger.warning(
+                "⚠️ Таблицы trial_claims нет. Примените миграцию "
+                "migrations/2026-07-18_trial_guard_and_search.sql"
+            )
+    return _trial_table_ok
+
+async def has_used_trial(user_id: int) -> bool:
+    """Брал ли пользователь пробный период когда-либо (переживает удаление)."""
+    if await _trial_table_available():
+        try:
+            res = await supabase.table("trial_claims").select("user_id").eq("user_id", user_id).execute()
+            if res.data:
+                return True
+        except Exception:
+            pass
+    # Резервная проверка по истории платежей (и для до-миграционного периода).
+    try:
+        res = await supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
+        return bool(res.data)
+    except Exception:
+        return False
+
+async def mark_trial_used(user_id: int):
+    """Фиксирует факт использования триала навсегда."""
+    if await _trial_table_available():
+        try:
+            await supabase.table("trial_claims").upsert(
+                {"user_id": user_id, "claimed_at": datetime.now().isoformat()}
+            ).execute()
+        except Exception as e:
+            logger.warning(f"Не удалось записать trial_claims для {user_id}: {e}")
+
+# ====================== МАССОВОЕ ПЕРЕСОЗДАНИЕ ПОДПИСОК ======================
+async def reprovision_all_subscriptions(bot_instance: "Bot", target_server_id: Optional[int] = None) -> Dict[str, Any]:
+    """Пересоздаёт клиентов в панелях для всех активных подписок и рассылает
+    пользователям новые ссылки. Нужно, когда серверы заменены на новые и все
+    клиенты слетели: админ добавляет новые серверы в БД и жмёт одну кнопку.
+
+    Для каждой активной подписки:
+      • целевой сервер = текущий (если активен) либо target_server_id,
+        либо первый активный сервер;
+      • в панели создаётся новый клиент (uuid/email/subId), сохраняется
+        остаток срока (expiry_date);
+      • строка subscriptions обновляется на новые данные;
+      • пользователю в чат с ботом отправляется новая ссылка-подписка.
+    """
+    await init_supabase()
+    servers = await load_servers_from_supabase()  # только активные
+    if not servers:
+        return {"ok": False, "error": "Нет активных серверов"}
+    server_by_id = {s["id"]: s for s in servers}
+    default_server = server_by_id.get(target_server_id) or servers[0]
+
+    subs = await fetch_all_supabase_rows("subscriptions", "*")
+    now_ms = int(time.time() * 1000)
+    active = [
+        s for s in subs
+        if s.get("status") == "active" and s.get("user_id")
+        and ((s.get("expiry_date") or 0) == 0 or (s.get("expiry_date") or 0) > now_ms)
+    ]
+
+    stats = {"ok": True, "total": len(active), "reprovisioned": 0, "notified": 0, "failed": 0}
+    for sub in active:
+        target = server_by_id.get(sub.get("server_id")) or default_server
+        expiry = sub.get("expiry_date") or int((datetime.now() + timedelta(days=30)).timestamp() * 1000)
+
+        new_uuid = str(uuid.uuid4())
+        new_sub_id = generate_sub_id()
+        new_email = generate_client_email()
+        client_dict = {
+            "id": new_uuid, "flow": "xtls-rprx-vision", "email": new_email,
+            "limitIp": 2, "totalGB": 0, "expiryTime": expiry, "enable": True,
+            "tgId": coerce_tg_id(sub["user_id"]), "subId": new_sub_id,
+            "comment": "Reprovision", "reset": 0,
+        }
+        xui = XUIApi(target)
+        try:
+            ok_create = await xui.add_client(client_dict)
+        except Exception as e:
+            logger.error(f"reprovision add_client {sub['user_id']}: {e}")
+            ok_create = False
+        finally:
+            await xui.close()
+        if not ok_create:
+            stats["failed"] += 1
+            continue
+
+        try:
+            await supabase.table("subscriptions").update({
+                "server_id": target["id"], "client_uuid": new_uuid,
+                "email": new_email, "sub_id": new_sub_id,
+                "last_sync": int(datetime.now().timestamp()),
+            }).eq("id", sub["id"]).execute()
+        except Exception as e:
+            logger.error(f"reprovision db update {sub['id']}: {e}")
+            stats["failed"] += 1
+            continue
+        stats["reprovisioned"] += 1
+
+        sub_link = generate_subscription_link(target, new_sub_id)
+        lang = await get_user_lang(sub["user_id"])
+        if lang == "en":
+            text = (
+                "🔄 <b>Your VPN connection has been updated.</b>\n\n"
+                "We migrated to new servers — here is your fresh subscription link:\n"
+                f"<code>{esc(sub_link)}</code>\n\n"
+                "Re-import it into your app (v2rayTun, Streisand, v2rayNG). "
+                "The old link no longer works."
+            )
+        else:
+            text = (
+                "🔄 <b>Ваше подключение обновлено.</b>\n\n"
+                "Мы перешли на новые серверы — вот ваша новая ссылка-подписка:\n"
+                f"<code>{esc(sub_link)}</code>\n"
+                f"{COPY_HINT}\n\n"
+                "Импортируйте её заново в приложение (v2rayTun, Streisand, v2rayNG). "
+                "Старая ссылка больше не работает."
+            )
+        try:
+            await bot_instance.send_message(sub["user_id"], text, parse_mode=ParseMode.HTML)
+            stats["notified"] += 1
+        except Exception as e:
+            logger.warning(f"reprovision notify {sub['user_id']}: {e}")
+        await asyncio.sleep(0.05)  # бережём лимиты Telegram
+
+    logger.info(f"🔄 Reprovision завершён: {stats}")
+    return stats
+
 def generate_qr_png(text: str) -> bytes:
     """PNG-байты QR-кода (для скачивания/отправки QR ссылки-подписки)."""
     qr = qrcode.QRCode(box_size=10, border=2)
@@ -1778,6 +1921,9 @@ async def create_subscription(
         if payment_id:
             await supabase.table("payments").update({"status": "completed"}).eq("id", payment_id).execute()
             await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+        # Триал фиксируем навсегда (защита от повторной выдачи после удаления)
+        if months == 0.233:
+            await mark_trial_used(user_id)
         # Реферальный бонус за первую платную покупку приглашённого
         await award_referral_purchase(user_id, rub_amount, payment_id)
         logger.info(f"✅ Подписка создана для {user_id} на сервере {server['name']}")
@@ -2296,8 +2442,7 @@ async def request_trial(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     await ensure_user_exists_supabase(user_id, message.from_user.username, message.from_user.full_name)
-    res = await supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
-    if res.data:
+    if await has_used_trial(user_id):
         await message.answer(
             "✨ Вы уже активировали пробный период. Надеемся, вам понравилось! Для продолжения используйте платную подписку.",
             reply_markup=main_keyboard(is_admin(user_id))
@@ -2330,8 +2475,7 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
 
     # ИСПРАВЛЕНИЕ: повторная проверка перед выдачей (защита от гонки)
-    res = await supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
-    if res.data:
+    if await has_used_trial(user_id):
         await callback.message.answer("✨ Вы уже активировали пробный период.")
         await state.clear()
         await callback.answer()

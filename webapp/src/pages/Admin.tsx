@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { api, Ticket, Tariff } from '../lib/api';
+import { api, Ticket, Tariff, AdminSearchResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback } from '../lib/telegram';
 import { cn, formatBytes } from '../lib/utils';
@@ -1245,6 +1245,31 @@ function UsersTab() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<AdminSearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // Серверный поиск по email из панели, Telegram ID, ID подписки в БД,
+  // sub_id, @username и имени. Локального списка (200) для email мало —
+  // поэтому уходим на бэкенд. Дебаунс 350мс.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        setSearchResults(await api.admin.search(q));
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const remove = async () => {
     if (!confirm || busy) return;
@@ -1263,51 +1288,76 @@ function UsersTab() {
 
   if (loading) return <Spinner />;
 
-  const q = query.trim().toLowerCase();
-  const filtered = (users || []).filter(
-    (u: any) =>
-      !q ||
-      String(u.user_id).includes(q) ||
-      (u.username || '').toLowerCase().includes(q) ||
-      (u.full_name || '').toLowerCase().includes(q),
-  );
+  const isSearching = query.trim().length >= 2;
 
   return (
     <div className="flex flex-col gap-4">
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="🔍 Поиск по ID, @username, имени…"
+        placeholder="🔍 Email из панели, Telegram ID, ID в БД, @username…"
         className="w-full glass rounded-full px-5 py-3.5 text-[15px] text-white placeholder:text-white/30 focus:outline-none"
       />
-      <Section title={`Пользователи (${filtered.length})`}>
-        <div className="flex flex-col gap-2.5">
-          {filtered.map((u: any) => (
-            <div key={u.user_id} className="ios-list px-5 py-4 flex justify-between items-center">
-              <button onClick={() => { hapticFeedback.selectionChanged(); setDetailId(u.user_id); }} className="min-w-0 text-left flex-1 active:opacity-60">
-                <div className="text-[15px] font-medium text-white truncate">
-                  {u.username ? `@${u.username}` : u.full_name || u.user_id}
-                  {u.is_admin && <span className="text-[10px] text-[#FF9F0A] font-bold ml-2 bg-[#FF9F0A]/15 px-2 py-0.5 rounded-full">ADMIN</span>}
-                </div>
-                <div className="text-[12px] text-white/45 font-mono mt-0.5">{u.user_id}</div>
-                <div className="text-[13px] text-white/55 mt-0.5">
-                  Подписок: {u.active_subs} · Оплачено: ₽{Math.round(u.total_paid)}
-                </div>
-              </button>
-              <div className="flex items-center gap-1.5 shrink-0 ml-3">
-                {!u.is_admin && (
-                  <button
-                    onClick={() => setConfirm(u)}
-                    className="w-9 h-9 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
-                  >
-                    <Trash2 className="w-4 h-4 text-[#FF6961]" />
-                  </button>
-                )}
-              </div>
+
+      {isSearching ? (
+        <Section title={searching ? 'Поиск…' : `Найдено (${(searchResults || []).length})`}>
+          {searching ? (
+            <Spinner />
+          ) : (searchResults || []).length === 0 ? (
+            <Card className="text-center text-[#8E8E93] py-6 text-[15px]">Ничего не найдено</Card>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {(searchResults || []).map((u) => (
+                <button
+                  key={u.user_id}
+                  onClick={() => { hapticFeedback.selectionChanged(); setDetailId(u.user_id); }}
+                  className="ios-list px-5 py-4 flex justify-between items-center text-left active:opacity-60"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-medium text-white truncate">
+                      {u.username ? `@${u.username}` : u.full_name || u.user_id}
+                    </div>
+                    <div className="text-[12px] text-white/45 font-mono mt-0.5">{u.user_id}</div>
+                    <div className="text-[12px] text-[#4DA6FF] mt-1">
+                      {u.matched_by}: <span className="text-white/60 font-mono">{u.matched_value}</span>
+                    </div>
+                  </div>
+                  <ChevronLeft className="w-5 h-5 text-white/25 rotate-180 shrink-0 ml-3" />
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
-      </Section>
+          )}
+        </Section>
+      ) : (
+        <Section title={`Пользователи (${(users || []).length})`}>
+          <div className="flex flex-col gap-2.5">
+            {(users || []).map((u: any) => (
+              <div key={u.user_id} className="ios-list px-5 py-4 flex justify-between items-center">
+                <button onClick={() => { hapticFeedback.selectionChanged(); setDetailId(u.user_id); }} className="min-w-0 text-left flex-1 active:opacity-60">
+                  <div className="text-[15px] font-medium text-white truncate">
+                    {u.username ? `@${u.username}` : u.full_name || u.user_id}
+                    {u.is_admin && <span className="text-[10px] text-[#FF9F0A] font-bold ml-2 bg-[#FF9F0A]/15 px-2 py-0.5 rounded-full">ADMIN</span>}
+                  </div>
+                  <div className="text-[12px] text-white/45 font-mono mt-0.5">{u.user_id}</div>
+                  <div className="text-[13px] text-white/55 mt-0.5">
+                    Подписок: {u.active_subs} · Оплачено: ₽{Math.round(u.total_paid)}
+                  </div>
+                </button>
+                <div className="flex items-center gap-1.5 shrink-0 ml-3">
+                  {!u.is_admin && (
+                    <button
+                      onClick={() => setConfirm(u)}
+                      className="w-9 h-9 btn-glass rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                    >
+                      <Trash2 className="w-4 h-4 text-[#FF6961]" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {detailId !== null && (
         <UserDetailSheet userId={detailId} onClose={() => setDetailId(null)} onChanged={reload} />
@@ -1712,7 +1762,28 @@ function ServersPage() {
   const { data: status, loading: statusLoading, reload: reloadStatus } = useAsyncData(() => api.admin.panelStatus());
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [reproving, setReproving] = useState(false);
+  const [confirmRepro, setConfirmRepro] = useState(false);
   const [editor, setEditor] = useState<{ open: boolean; server: any | null } | null>(null);
+
+  const doReprovision = async () => {
+    if (reproving) return;
+    setReproving(true);
+    setConfirmRepro(false);
+    try {
+      const s = await api.admin.reprovision();
+      hapticFeedback.notificationOccurred('success');
+      tg.showAlert(
+        `🔄 Запущено пересоздание для ${s.active} активных подписок.\n\n` +
+          'Всем пользователям в панелях создаются новые клиенты и рассылаются новые ссылки в чат. ' +
+          'Итоговый отчёт придёт вам в чат с ботом.',
+      );
+    } catch (e: any) {
+      tg.showAlert(e.message);
+    } finally {
+      setReproving(false);
+    }
+  };
 
   const doSync = async () => {
     if (syncing) return;
@@ -1850,6 +1921,51 @@ function ServersPage() {
           </button>
         </Card>
       </Section>
+
+      {/* Массовое пересоздание — после замены серверов */}
+      <Section title="Смена серверов">
+        <Card className="p-4 flex flex-col gap-3">
+          <div className="text-[13px] text-white/55 leading-snug px-1">
+            Заменили серверы и клиенты слетели? Добавьте новые серверы выше, затем нажмите — всем активным
+            подписчикам создадутся новые клиенты в панели и придут новые ссылки в чат с ботом.
+          </div>
+          <button
+            onClick={() => setConfirmRepro(true)}
+            disabled={reproving}
+            className="w-full text-white text-[16px] font-semibold py-4 rounded-full transition-transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
+            style={{ background: 'linear-gradient(180deg,#BF5AF2,#9A3FD0)', boxShadow: '0 10px 24px rgba(191,90,242,0.3)' }}
+          >
+            {reproving ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+            {reproving ? 'Запуск…' : 'Пересоздать и разослать ссылки'}
+          </button>
+        </Card>
+      </Section>
+
+      {confirmRepro && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 backdrop-blur-md px-6" onClick={() => setConfirmRepro(false)}>
+          <div className="glass-sheet rounded-[32px] p-6 w-full max-w-[360px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[18px] font-bold text-white mb-2">Пересоздать все подписки?</div>
+            <div className="text-[14px] text-white/55 mb-5">
+              Всем активным подписчикам будут созданы новые клиенты в панелях и разосланы новые ссылки. Старые ссылки
+              перестанут работать. Операция необратима.
+            </div>
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={doReprovision}
+                className="w-full py-3.5 btn-primary rounded-full text-white font-bold text-[16px] active:scale-[0.98] transition-transform"
+              >
+                Да, пересоздать и разослать
+              </button>
+              <button
+                onClick={() => setConfirmRepro(false)}
+                className="w-full py-3.5 btn-glass rounded-full text-white font-semibold text-[16px] active:scale-[0.98] transition-transform"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Section title="Наши ноды">
         {loading ? (

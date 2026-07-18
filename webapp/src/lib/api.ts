@@ -215,7 +215,18 @@ export const api = {
     userDetail: (userId: number) => request<AdminUserDetail>('GET', `/api/admin/users/${userId}`),
     deleteUser: (userId: number) => request('DELETE', `/api/admin/users/${userId}`),
     revokeSub: (subId: string) => request<{ revoked: boolean }>('POST', `/api/admin/subscriptions/${subId}/revoke`, {}),
+    search: (q: string) => request<AdminSearchResult[]>('GET', `/api/admin/search?q=${encodeURIComponent(q)}`),
+    reprovision: (serverId?: number) =>
+      request<{ started: boolean; active: number }>('POST', '/api/admin/reprovision', serverId ? { server_id: serverId } : {}),
   },
+};
+
+export type AdminSearchResult = {
+  user_id: number;
+  matched_by: string;
+  matched_value: string;
+  username?: string;
+  full_name?: string;
 };
 
 export type AdminUserDetail = {

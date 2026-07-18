@@ -305,7 +305,7 @@ async def api_bootstrap(request: web.Request) -> web.Response:
         await B.load_tariffs()
 
     accepted = await B.has_accepted_terms(user_id)
-    trial_res = await B.supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
+    trial_used = await B.has_used_trial(user_id)
     servers = await B.load_servers_from_supabase()
 
     # Баллы и настройка напоминаний — устойчиво к отсутствию колонок.
@@ -325,7 +325,7 @@ async def api_bootstrap(request: web.Request) -> web.Response:
                  "first_name": user.get("first_name"), "last_name": user.get("last_name")},
         "is_admin": B.is_admin(user_id),
         "accepted_terms": accepted,
-        "trial_used": bool(trial_res.data),
+        "trial_used": trial_used,
         "tariffs": tariff_list(),
         "servers": [safe_server(s) for s in servers],
         "countries": available_countries(servers),
@@ -482,8 +482,9 @@ async def api_trial(request: web.Request) -> web.Response:
     if not isinstance(server_id, int):
         return err("Не указан сервер")
 
-    dup = await B.supabase.table("payments").select("id").eq("user_id", user_id).eq("method", "trial").execute()
-    if dup.data:
+    # Персистентная проверка: триал один раз на аккаунт навсегда (переживает
+    # удаление аккаунта — иначе можно было удалиться и взять триал снова).
+    if await B.has_used_trial(user_id):
         return err("Вы уже активировали пробный период")
 
     servers = await B.load_servers_from_supabase()
@@ -913,8 +914,17 @@ async def api_country_request(request: web.Request) -> web.Response:
 
 
 async def _purge_user_data(user_id: int) -> None:
-    """Полностью удаляет все данные пользователя из БД (после отзыва доступа)."""
-    for table in ("subscriptions", "payments", "tickets", "ticket_messages",
+    """Удаляет все данные пользователя из БД (после отзыва доступа).
+
+    ВАЖНО: таблица trial_claims и записи о триале НЕ удаляются — иначе можно
+    было бы удалить аккаунт и снова взять бесплатную неделю. Триал —
+    одноразовый на Telegram-аккаунт навсегда."""
+    # payments: удаляем всё, КРОМЕ маркера использованного триала
+    try:
+        await B.supabase.table("payments").delete().eq("user_id", user_id).neq("method", "trial").execute()
+    except Exception as e:
+        logger.warning(f"purge payments for {user_id}: {e}")
+    for table in ("subscriptions", "tickets", "ticket_messages",
                   "country_requests", "pending_confirmations", "point_transactions",
                   "users"):
         try:
@@ -1873,6 +1883,107 @@ async def api_admin_revoke_sub(request: web.Request) -> web.Response:
     return ok({"revoked": True})
 
 
+async def api_admin_search(request: web.Request) -> web.Response:
+    """Поиск пользователя по: Telegram ID, ID подписки в БД, email из панели,
+    sub_id, @username или имени. Возвращает совпавших пользователей с
+    указанием, чем совпало (для админского UI)."""
+    q = (request.query.get("q") or "").strip()
+    if len(q) < 2:
+        return err("Слишком короткий запрос")
+    q_low = q.lower().lstrip("@")
+
+    matches: Dict[int, Dict[str, Any]] = {}
+
+    def add(uid: Optional[int], how: str, value: str):
+        if uid is None:
+            return
+        matches.setdefault(int(uid), {"user_id": int(uid), "matched_by": how, "matched_value": value})
+
+    # По Telegram ID (точное)
+    if q.isdigit():
+        r = await B.supabase.table("users").select("user_id").eq("user_id", int(q)).execute()
+        if r.data:
+            add(int(q), "Telegram ID", q)
+        # По ID подписки в БД
+        rs = await B.supabase.table("subscriptions").select("user_id, id").eq("id", int(q)).execute()
+        for s in rs.data or []:
+            add(s["user_id"], "ID подписки (БД)", str(s["id"]))
+
+    # По email из панели (частичное) и по sub_id (точное)
+    try:
+        rem = await B.supabase.table("subscriptions").select("user_id, email").ilike("email", f"%{q}%").limit(20).execute()
+        for s in rem.data or []:
+            add(s["user_id"], "Email (панель)", s.get("email") or "")
+    except Exception:
+        pass
+    rsid = await B.supabase.table("subscriptions").select("user_id, sub_id").eq("sub_id", q).execute()
+    for s in rsid.data or []:
+        add(s["user_id"], "sub_id", q)
+
+    # По username / имени (частичное)
+    try:
+        ru = await B.supabase.table("users").select("user_id, username").ilike("username", f"%{q_low}%").limit(20).execute()
+        for u in ru.data or []:
+            add(u["user_id"], "@username", u.get("username") or "")
+        rn = await B.supabase.table("users").select("user_id, full_name").ilike("full_name", f"%{q}%").limit(20).execute()
+        for u in rn.data or []:
+            add(u["user_id"], "Имя", u.get("full_name") or "")
+    except Exception:
+        pass
+
+    # Обогащаем данными пользователя
+    ids = list(matches.keys())[:40]
+    result = []
+    if ids:
+        urows = await B.supabase.table("users").select("user_id, username, full_name").in_("user_id", ids).execute()
+        umap = {u["user_id"]: u for u in (urows.data or [])}
+        for uid in ids:
+            u = umap.get(uid, {})
+            result.append({
+                **matches[uid],
+                "username": u.get("username"),
+                "full_name": u.get("full_name"),
+            })
+    return ok(result)
+
+
+async def api_admin_reprovision(request: web.Request) -> web.Response:
+    """Пересоздаёт клиентов во всех панелях для активных подписок и рассылает
+    пользователям новые ссылки. Тяжёлая операция — выполняем в фоне, чтобы
+    HTTP-запрос не висел; итог придёт админу в чат с ботом."""
+    admin_id = request["user_id"]
+    body = await request.json() if request.can_read_body else {}
+    target = body.get("server_id")
+    target_id = int(target) if isinstance(target, int) or (isinstance(target, str) and target.isdigit()) else None
+
+    # Быстрая оценка масштаба для мгновенного ответа
+    now_ms = int(time.time() * 1000)
+    all_subs = await B.fetch_all_supabase_rows("subscriptions", "status, expiry_date, user_id")
+    active_cnt = sum(
+        1 for s in all_subs
+        if s.get("status") == "active" and s.get("user_id")
+        and ((s.get("expiry_date") or 0) == 0 or (s.get("expiry_date") or 0) > now_ms)
+    )
+
+    async def run():
+        stats = await B.reprovision_all_subscriptions(B.bot, target_id)
+        try:
+            await B.bot.send_message(
+                admin_id,
+                "🔄 <b>Пересоздание подписок завершено</b>\n\n"
+                f"Активных: {stats.get('total', 0)}\n"
+                f"Пересоздано в панели: {stats.get('reprovisioned', 0)}\n"
+                f"Уведомлено в чате: {stats.get('notified', 0)}\n"
+                f"Ошибок: {stats.get('failed', 0)}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    asyncio.create_task(run())
+    return ok({"started": True, "active": active_cnt})
+
+
 async def api_admin_delete_user(request: web.Request) -> web.Response:
     uid_str = request.match_info["user_id"]
     if not uid_str.isdigit():
@@ -1963,9 +2074,11 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_post("/api/admin/servers/{server_id}/test", api_admin_server_test)
     r.add_get("/api/admin/panel-status", api_admin_panel_status)
     r.add_get("/api/admin/users", api_admin_users)
+    r.add_get("/api/admin/search", api_admin_search)
     r.add_get("/api/admin/users/{user_id}", api_admin_user_detail)
     r.add_delete("/api/admin/users/{user_id}", api_admin_delete_user)
     r.add_post("/api/admin/subscriptions/{sub_id}/revoke", api_admin_revoke_sub)
+    r.add_post("/api/admin/reprovision", api_admin_reprovision)
 
     # Статика собранного веб-аппа (webapp/dist) по адресу /app
     import os
