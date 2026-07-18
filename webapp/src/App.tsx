@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
-import { FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy, Zap, ShieldCheck, Wifi, EyeOff, ChevronRight } from 'lucide-react';
+import { FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy, ChevronRight } from 'lucide-react';
 import { BottomNav, NavTab } from './components/layout/BottomNav';
 import { initTelegramApp, tg, hapticFeedback } from './lib/telegram';
 import { api, Bootstrap, ApiError } from './lib/api';
@@ -46,13 +46,6 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
   );
 }
 
-const WELCOME_FEATURES = [
-  { icon: Zap, tint: '#FFD60A', t: 'feat.speed.t', d: 'feat.speed.d' },
-  { icon: ShieldCheck, tint: '#32D74B', t: 'feat.secure.t', d: 'feat.secure.d' },
-  { icon: Wifi, tint: '#0A84FF', t: 'feat.wifi.t', d: 'feat.wifi.d' },
-  { icon: EyeOff, tint: '#BF5AF2', t: 'feat.nolog.t', d: 'feat.nolog.d' },
-];
-
 function TermsGate({ onAccepted }: { onAccepted: () => void }) {
   const [busy, setBusy] = useState(false);
   const [legal, setLegal] = useState<'terms' | 'privacy' | null>(null);
@@ -69,24 +62,21 @@ function TermsGate({ onAccepted }: { onAccepted: () => void }) {
     }
   };
 
+  // Фон — чистый чёрный (#000), в точности как у логотипа, чтобы он сливался
+  // с экраном. Всё умещается на один экран без прокрутки.
   return (
     <div
-      className="min-h-screen flex flex-col px-5 pb-8"
+      className="fixed inset-0 bg-black flex flex-col px-6 pb-8 overflow-hidden"
       style={{
         paddingTop: 'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 12px), 24px)',
       }}
     >
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 py-4">
-        {/* Логотип бренда */}
-        <div className="relative">
-          <div className="absolute inset-0 blur-3xl bg-[#0A84FF]/25 rounded-full scale-90" />
-          <img
-            src={logoUrl}
-            alt="Gigabyte"
-            className="relative w-[132px] h-[132px] object-contain drop-shadow-[0_8px_40px_rgba(10,132,255,0.45)]"
-          />
-        </div>
-
+      <div className="flex-1 flex flex-col items-center justify-center gap-5 min-h-0">
+        <img
+          src={logoUrl}
+          alt="Gigabyte"
+          className="w-[190px] h-[190px] object-contain drop-shadow-[0_10px_50px_rgba(10,132,255,0.5)]"
+        />
         <div className="text-center">
           <h1 className="text-[30px] font-bold tracking-tight text-white leading-tight">
             {t('terms.welcome')}
@@ -95,28 +85,10 @@ function TermsGate({ onAccepted }: { onAccepted: () => void }) {
             {t('terms.tagline')}
           </div>
         </div>
-
-        {/* Преимущества карточками */}
-        <div className="w-full max-w-[420px] flex flex-col gap-2.5 mt-1">
-          {WELCOME_FEATURES.map((f) => (
-            <div key={f.t} className="glass rounded-3xl p-3.5 flex items-center gap-3.5">
-              <div
-                className="w-11 h-11 rounded-2xl app-icon flex items-center justify-center shrink-0"
-                style={{ background: `linear-gradient(180deg, ${f.tint}55, ${f.tint}1f)` }}
-              >
-                <f.icon className="w-[22px] h-[22px]" style={{ color: f.tint }} />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[15.5px] font-semibold text-white leading-tight">{t(f.t)}</div>
-                <div className="text-[13px] text-[#8E8E93] leading-snug mt-0.5">{t(f.d)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Документы + принятие */}
-      <div className="w-full max-w-[420px] mx-auto flex flex-col gap-2.5 mt-4">
+      <div className="w-full max-w-[420px] mx-auto flex flex-col gap-2.5 shrink-0">
         <div className="glass rounded-3xl overflow-hidden">
           <button
             onClick={() => { hapticFeedback.selectionChanged(); setLegal('terms'); }}
