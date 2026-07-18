@@ -57,13 +57,6 @@ const Card = ({ children, className }: { children: React.ReactNode; className?: 
   <div className={cn('glass rounded-[32px] overflow-hidden', className)}>{children}</div>
 );
 
-const Row = ({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) => (
-  <div className="flex justify-between items-center px-5 py-4 border-b border-white/[0.06] last:border-b-0">
-    <div className="text-[15px] text-white/85">{label}</div>
-    <div className={cn('text-[16px] font-semibold', accent || 'text-white')}>{value}</div>
-  </div>
-);
-
 // Отдельная карточка-строка (как блоки в пользовательском интерфейсе)
 const RowCard = ({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) => (
   <div className="ios-list flex justify-between items-center px-5 py-4">
@@ -718,12 +711,12 @@ function TariffsTab() {
         {ratesLoading || !rates ? (
           <Spinner />
         ) : (
-          <Card>
-            <Row label="ЦБ РФ" value={<span className="font-mono text-white/60">{fmt(rates.usd_cbr)}</span>} />
-            <Row label="Рыночный" value={<span className="font-mono text-white/60">{fmt(rates.usd_market)}</span>} />
-            <Row label="USDT P2P" value={<span className="font-mono text-[#4DA6FF]">{fmt(rates.usdt_p2p)}</span>} />
-            <Row label="Эффективный" value={<span className="font-mono text-[#FF9F0A]">{fmt(rates.usd_effective)}</span>} />
-          </Card>
+          <div className="flex flex-col gap-2.5">
+            <RowCard label="ЦБ РФ" value={<span className="font-mono text-white/60">{fmt(rates.usd_cbr)}</span>} />
+            <RowCard label="Рыночный" value={<span className="font-mono text-white/60">{fmt(rates.usd_market)}</span>} />
+            <RowCard label="USDT P2P" value={<span className="font-mono text-[#4DA6FF]">{fmt(rates.usdt_p2p)}</span>} />
+            <RowCard label="Эффективный" value={<span className="font-mono text-[#FF9F0A]">{fmt(rates.usd_effective)}</span>} />
+          </div>
         )}
       </Section>
     </div>
