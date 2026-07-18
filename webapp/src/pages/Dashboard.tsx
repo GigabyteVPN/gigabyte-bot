@@ -532,21 +532,31 @@ const ReferralPage = ({
           </div>
         ) : (
           <>
-            {/* Баланс + прогресс до бесплатного месяца */}
-            <div className="ios-list px-6 py-7 relative">
-              <div className="absolute top-0 right-0 w-40 h-40 bg-[#BF5AF2]/15 blur-3xl rounded-full translate-x-10 -translate-y-10 pointer-events-none" />
-              <div className="relative z-10 flex flex-col gap-6">
+            {/* Баланс + прогресс до бесплатного месяца.
+                shrink-0 + overflow видимый: в скролл-контейнере (flex-col)
+                карточки по умолчанию сжимаются по высоте, из-за чего крупное
+                число раньше обрезалось. Здесь фикс: не сжимаем и не режем.
+                Свечение — радиальным градиентом в фоне (не требует clip). */}
+            <div
+              className="shrink-0 relative rounded-[32px] p-6 border border-white/10"
+              style={{
+                background:
+                  'radial-gradient(130% 130% at 100% 0%, rgba(191,90,242,0.22), transparent 55%), linear-gradient(145deg, rgba(255,255,255,0.09), rgba(255,255,255,0.035))',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.10)',
+              }}
+            >
+              <div className="flex flex-col gap-6">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 app-icon bg-gradient-to-b from-[#BF5AF2]/50 to-[#BF5AF2]/15 rounded-full flex items-center justify-center shrink-0">
                     <Gift className="w-7 h-7 text-[#D7A8FF]" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] text-[#8E8E93] font-medium uppercase tracking-wider">
+                    <div className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider">
                       {t('ref.balance')}
                     </div>
-                    <div className="flex items-end gap-2 mt-2">
-                      <span className="text-[40px] font-bold text-white leading-[1.25] py-0.5">{data.points}</span>
-                      <span className="text-[15px] text-[#8E8E93] font-medium pb-2.5">{t('ref.points')}</span>
+                    <div className="flex items-baseline gap-2 mt-2">
+                      <span className="text-[38px] font-bold text-white leading-[1.15]">{data.points}</span>
+                      <span className="text-[15px] text-[#8E8E93] font-medium">{t('ref.points')}</span>
                     </div>
                   </div>
                 </div>
@@ -656,7 +666,7 @@ const ReferralPage = ({
             </section>
 
             {/* Статистика */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 shrink-0">
               <RefStat value={data.invited_total} label={t('ref.invited')} />
               <RefStat value={data.invited_paid} label={t('ref.paidFriends')} />
             </div>
