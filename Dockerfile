@@ -21,6 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py webapp_api.py ./
+COPY assets ./assets
 COPY --from=webapp-build /webapp/dist ./webapp/dist
 
 RUN useradd -m -u 1000 gigabyte && chown -R gigabyte:gigabyte /app

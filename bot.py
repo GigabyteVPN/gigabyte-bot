@@ -903,11 +903,30 @@ async def reprovision_all_subscriptions(bot_instance: "Bot", target_server_id: O
     return stats
 
 def generate_qr_png(text: str) -> bytes:
-    """PNG-байты QR-кода (для скачивания/отправки QR ссылки-подписки)."""
-    qr = qrcode.QRCode(box_size=10, border=2)
+    """PNG-байты QR-кода ссылки-подписки с логотипом Gigabyte в центре.
+
+    Уровень коррекции H (до 30% данных восстановимо) + белая подложка под
+    логотипом — QR стабильно сканируется даже с иконкой в центре."""
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=10, border=2
+    )
     qr.add_data(text)
     qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
+    img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    try:
+        from PIL import Image
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            logo = Image.open(logo_path).convert("RGBA")
+            qw, qh = img.size
+            ls = qw // 5  # логотип ~20% ширины QR
+            logo = logo.resize((ls, ls), Image.LANCZOS)
+            pad = ls + max(12, ls // 6)
+            bg = Image.new("RGB", (pad, pad), "white")
+            bg.paste(logo, ((pad - ls) // 2, (pad - ls) // 2), logo)
+            img.paste(bg, ((qw - pad) // 2, (qh - pad) // 2))
+    except Exception as e:
+        logger.warning(f"QR-логотип не наложен: {e}")
     bio = BytesIO()
     img.save(bio, format="PNG")
     return bio.getvalue()

@@ -39,6 +39,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { LANG } from '../lib/i18n';
 import { TERMS, PRIVACY } from '../lib/legal';
 import Legal from './Legal';
+import logoUrl from '../assets/logo.png';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -1274,7 +1275,12 @@ export default function Dashboard() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="bg-white rounded-[32px] p-6 flex flex-col items-center gap-4 w-full">
-                <QRCodeSVG value={qrSub.sub_link} size={228} level="M" />
+                <QRCodeSVG
+                  value={qrSub.sub_link}
+                  size={228}
+                  level="H"
+                  imageSettings={{ src: logoUrl, height: 46, width: 46, excavate: true }}
+                />
                 <div className="text-[13px] text-black/60 font-medium text-center">{t('dash.qrScan')}</div>
               </div>
               <div className="flex gap-3 w-full">
