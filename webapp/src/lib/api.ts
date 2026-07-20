@@ -9,15 +9,23 @@ const API_BASE: string = (import.meta.env.VITE_API_BASE as string) || '';
 
 const DASH_TOKEN_KEY = 'gigabyte_dash_token';
 
-/** Токен дашборда: из #token=… в URL (сохраняем) либо из localStorage. */
+/** Токен дашборда: из ?token=… в URL (сохраняем) либо из localStorage.
+ *  Именно query, а не hash — hash занят HashRouter'ом приложения. */
 export function getDashToken(): string | null {
   try {
-    const m = window.location.hash.match(/token=([^&]+)/);
-    if (m) {
-      localStorage.setItem(DASH_TOKEN_KEY, m[1]);
-      // убираем токен из адресной строки, чтобы не светился
-      history.replaceState(null, '', window.location.pathname + window.location.search);
-      return m[1];
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get('token');
+    if (t) {
+      localStorage.setItem(DASH_TOKEN_KEY, t);
+      // убираем токен из адресной строки, чтобы не светился в истории
+      q.delete('token');
+      const qs = q.toString();
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+      );
+      return t;
     }
     return localStorage.getItem(DASH_TOKEN_KEY);
   } catch {

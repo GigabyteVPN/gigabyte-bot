@@ -2435,7 +2435,7 @@ async def cmd_dashboard(message: Message):
         )
         return
     token = dashboard_token(user_id)
-    link = f"{DASHBOARD_URL}/#token={token}"
+    link = f"{DASHBOARD_URL}/?token={token}"
     days = DASHBOARD_TOKEN_TTL_HOURS // 24
     await message.answer(
         "🖥 <b>Веб-дашборд Gigabyte</b>\n\n"
