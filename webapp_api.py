@@ -1771,20 +1771,43 @@ async def api_admin_servers_health(request: web.Request) -> web.Response:
     for s in servers:
         key = (s.get("panel_url") or "").rstrip("/")
         if key in seen:
-            st = seen[key]
+            st, inbounds, reachable = seen[key]
         else:
             xui = B.XUIApi(s)
+            st, inbounds, reachable = None, [], False
             try:
-                st = await xui.server_status()
+                if await xui.login():
+                    reachable = True
+                    inbounds = await xui.list_inbounds()
+                    st = await xui.server_status()  # метрики хоста, если панель отдаёт
             except Exception as e:
                 logger.warning(f"health {s.get('name')}: {e}")
-                st = None
             finally:
                 await xui.close()
-            seen[key] = st
+            seen[key] = (st, inbounds, reachable)
+
+        # Данные по нашему инбаунду — работают всегда (проверено)
+        ib = next((i for i in inbounds if i.get("id") == s.get("inbound_id")), None)
+        stats = (ib or {}).get("clientStats") or []
+        online = len(_online_emails_from_inbound(ib))
+        up = sum((c.get("up") or 0) for c in stats)
+        down = sum((c.get("down") or 0) for c in stats)
+
+        base = {
+            "id": s.get("id"),
+            "name": s.get("name"),
+            "online": reachable,
+            "inbound_found": ib is not None,
+            "port": (ib or {}).get("port"),
+            "clients": len(stats),
+            "clients_online": online,
+            "traffic_up": up,
+            "traffic_down": down,
+        }
 
         if not st:
-            result.append({"id": s.get("id"), "name": s.get("name"), "online": False})
+            # Метрик хоста нет — отдаём то, что есть (панель + инбаунд)
+            result.append(base)
             continue
 
         def num(v, default=0):
@@ -1802,9 +1825,7 @@ async def api_admin_servers_health(request: web.Request) -> web.Response:
         loads = st.get("loads") or []
 
         result.append({
-            "id": s.get("id"),
-            "name": s.get("name"),
-            "online": True,
+            **base,
             "cpu_percent": round(num(cpu), 1),
             "cpu_cores": st.get("cpuCores") or st.get("logicalPro"),
             "load": [round(num(x), 2) for x in loads[:3]],

@@ -266,6 +266,12 @@ export type ServerHealth = {
   id: number;
   name: string;
   online: boolean;
+  inbound_found?: boolean;
+  port?: number;
+  clients?: number;
+  clients_online?: number;
+  traffic_up?: number;
+  traffic_down?: number;
   cpu_percent?: number;
   cpu_cores?: number;
   load?: number[];

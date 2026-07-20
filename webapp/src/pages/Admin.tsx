@@ -1820,29 +1820,58 @@ function ServersHealth() {
             </div>
             {s.online ? (
               <>
-                <div className="grid grid-cols-2 gap-x-5 gap-y-3">
-                  <Meter label={`CPU${s.cpu_cores ? ` · ${s.cpu_cores} ядер` : ''}`} used={s.cpu_percent} unit="percent" />
-                  <Meter label="RAM" used={s.mem_used} total={s.mem_total} />
-                  <Meter label="Диск" used={s.disk_used} total={s.disk_total} warn={85} />
-                  <div>
-                    <div className="text-[12px] text-white/60 mb-1">Сеть сейчас</div>
-                    <div className="text-[13px] font-semibold text-white">
-                      ↓ {formatBytes(s.net_down_speed || 0)}/с · ↑ {formatBytes(s.net_up_speed || 0)}/с
+                {/* Клиенты и трафик — всегда доступны из панели */}
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  <div className="glass-inner rounded-2xl px-3 py-2.5">
+                    <div className="text-[11px] text-white/50 uppercase tracking-wider">Онлайн</div>
+                    <div className="text-[19px] font-bold text-[#32D74B] leading-none mt-1">
+                      {s.clients_online ?? 0}
+                      <span className="text-[13px] text-white/40 font-medium"> / {s.clients ?? 0}</span>
                     </div>
                   </div>
+                  <div className="glass-inner rounded-2xl px-3 py-2.5">
+                    <div className="text-[11px] text-white/50 uppercase tracking-wider">Трафик ↓</div>
+                    <div className="text-[15px] font-bold leading-none mt-1.5">{formatBytes(s.traffic_down || 0)}</div>
+                  </div>
+                  <div className="glass-inner rounded-2xl px-3 py-2.5">
+                    <div className="text-[11px] text-white/50 uppercase tracking-wider">Трафик ↑</div>
+                    <div className="text-[15px] font-bold leading-none mt-1.5">{formatBytes(s.traffic_up || 0)}</div>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 pt-3 border-t border-white/[0.06] text-[12px] text-white/50">
-                  <span>
-                    xray:{' '}
-                    <b className={s.xray_state === 'running' ? 'text-[#32D74B]' : 'text-[#FF6961]'}>
-                      {s.xray_state || '—'}
-                    </b>
-                    {s.xray_version ? ` ${s.xray_version}` : ''}
-                  </span>
-                  {s.load && s.load.length > 0 && <span>LA: {s.load.join(' / ')}</span>}
-                  {s.tcp_count != null && <span>TCP: {s.tcp_count}</span>}
-                  <span>трафик: ↓{formatBytes(s.net_recv || 0)} ↑{formatBytes(s.net_sent || 0)}</span>
-                </div>
+
+                {/* Метрики «железа» — если панель ноды их отдаёт */}
+                {s.cpu_percent != null && (
+                  <>
+                    <div className="grid grid-cols-2 gap-x-5 gap-y-3">
+                      <Meter label={`CPU${s.cpu_cores ? ` · ${s.cpu_cores} ядер` : ''}`} used={s.cpu_percent} unit="percent" />
+                      <Meter label="RAM" used={s.mem_used} total={s.mem_total} />
+                      <Meter label="Диск" used={s.disk_used} total={s.disk_total} warn={85} />
+                      <div>
+                        <div className="text-[12px] text-white/60 mb-1">Сеть сейчас</div>
+                        <div className="text-[13px] font-semibold text-white">
+                          ↓ {formatBytes(s.net_down_speed || 0)}/с · ↑ {formatBytes(s.net_up_speed || 0)}/с
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 pt-3 border-t border-white/[0.06] text-[12px] text-white/50">
+                      <span>
+                        xray:{' '}
+                        <b className={s.xray_state === 'running' ? 'text-[#32D74B]' : 'text-[#FF6961]'}>
+                          {s.xray_state || '—'}
+                        </b>
+                        {s.xray_version ? ` ${s.xray_version}` : ''}
+                      </span>
+                      {s.load && s.load.length > 0 && <span>LA: {s.load.join(' / ')}</span>}
+                      {s.tcp_count != null && <span>TCP: {s.tcp_count}</span>}
+                    </div>
+                  </>
+                )}
+
+                {!s.inbound_found && (
+                  <div className="mt-2 text-[12px] text-[#FF9F0A] bg-[#FF9F0A]/10 rounded-2xl px-3 py-2">
+                    ⚠️ Inbound не найден в панели — проверьте настройки сервера
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-[13px] text-[#FF6961]">Панель не отвечает — проверьте сервер</div>
