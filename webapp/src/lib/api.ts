@@ -110,6 +110,7 @@ export type Subscription = {
   sub_link: string | null;
   ics_url?: string | null; // ссылка на .ics-напоминание для календаря устройства
   qr_url?: string | null; // публичная ссылка на PNG QR-кода подписки
+  email?: string | null; // идентификатор клиента в панели (для поддержки)
 };
 
 export type ReferralSummary = {

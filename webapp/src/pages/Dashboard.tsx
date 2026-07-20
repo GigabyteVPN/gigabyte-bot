@@ -1080,6 +1080,47 @@ export default function Dashboard() {
                           </div>
                         </div>
                       </div>
+
+                      {/* ID клиента в панели — пользователь называет его в поддержке */}
+                      {sub.email && (
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-[13px] text-[#8E8E93] font-medium px-1">
+                            {t('dash.clientId')}
+                          </span>
+                          <button
+                            onClick={() => handleCopy(sub.email!, `mail${sub.id}`)}
+                            className="bg-black/20 border border-white/[0.05] rounded-full py-2.5 pl-4 pr-3 flex items-center gap-3 active:scale-[0.98] transition-transform relative overflow-hidden"
+                          >
+                            <span
+                              className={cn(
+                                'flex-1 text-left truncate font-mono text-[14px] text-white/80 transition-all',
+                                copiedId === `mail${sub.id}` && 'opacity-0 translate-y-2',
+                              )}
+                            >
+                              {sub.email}
+                            </span>
+                            <span
+                              className={cn(
+                                'absolute inset-0 flex items-center justify-center text-[14px] text-[#32D74B] font-bold tracking-tight opacity-0 transition-all duration-300',
+                                copiedId === `mail${sub.id}` && 'opacity-100',
+                              )}
+                            >
+                              {t('dash.copiedBig')}
+                            </span>
+                            <span className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center shrink-0 relative z-10">
+                              {copiedId === `mail${sub.id}` ? (
+                                <Check className="w-4 h-4 text-[#32D74B]" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5 text-white/50" />
+                              )}
+                            </span>
+                          </button>
+                          <span className="text-[12px] text-[#8E8E93]/70 px-1 leading-snug">
+                            {t('dash.clientIdHint')}
+                          </span>
+                        </div>
+                      )}
+
                       <button
                         onClick={() => {
                           hapticFeedback.selectionChanged();

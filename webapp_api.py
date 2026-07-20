@@ -368,7 +368,7 @@ async def api_accept_terms(request: web.Request) -> web.Response:
 async def api_subscriptions(request: web.Request) -> web.Response:
     user_id = request["user_id"]
     res = await B.supabase.table("subscriptions").select(
-        "id, server_id, sub_id, expiry_date, status"
+        "id, server_id, sub_id, expiry_date, status, email"
     ).eq("user_id", user_id).execute()
     servers = await B.load_servers_from_supabase()
     server_map = {s["id"]: s for s in servers}
@@ -384,6 +384,9 @@ async def api_subscriptions(request: web.Request) -> web.Response:
             "server": safe_server(server) if server else {"id": s["server_id"], "name": "Сервер"},
             "expiry_date": expiry,
             "status": "active" if is_active else "expired",
+            # Идентификатор клиента в панели — пользователь называет его
+            # в поддержке, чтобы мы быстро нашли его подписку.
+            "email": s.get("email"),
             "sub_link": B.generate_subscription_link(server, s["sub_id"]) if server else None,
             "ics_url": (
                 f"/api/public/reminder.ics?sub_id={s['sub_id']}&t={ics_token(s['sub_id'])}"

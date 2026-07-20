@@ -69,6 +69,11 @@ const dict: Dict = {
   'dash.traffic': { ru: 'Трафик', en: 'Traffic' },
   'dash.unlimited': { ru: 'Бессрочно ∞', en: 'Lifetime ∞' },
   'dash.subLink': { ru: 'Ссылка-подписка', en: 'Subscription link' },
+  'dash.clientId': { ru: 'ID подписки', en: 'Subscription ID' },
+  'dash.clientIdHint': {
+    ru: 'Назовите его в поддержке — так мы найдём вас быстрее',
+    en: 'Mention it in support — we’ll find you faster',
+  },
   'dash.copiedBig': { ru: 'СКОПИРОВАНО', en: 'COPIED' },
   'dash.extend': { ru: 'Продлить подписку', en: 'Renew subscription' },
   'dash.expiredCta': { ru: 'Подписка истекла — оформить новую', en: 'Expired — get a new one' },
