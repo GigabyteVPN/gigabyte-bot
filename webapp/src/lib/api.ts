@@ -1,9 +1,42 @@
 import { tg } from './telegram';
 
-// Все запросы к API авторизуются подписанным Telegram initData.
-// Бэкенд (webapp_api.py) проверяет HMAC-подпись токеном бота.
-
+// Авторизация запросов к API:
+//   • внутри Telegram — подписанный initData (`tma …`);
+//   • в веб-дашборде (обычный браузер) — подписанный ботом токен (`Bearer …`),
+//     который админ получает командой /dashboard. Бэкенд проверяет HMAC
+//     токеном бота в обоих случаях.
 const API_BASE: string = (import.meta.env.VITE_API_BASE as string) || '';
+
+const DASH_TOKEN_KEY = 'gigabyte_dash_token';
+
+/** Токен дашборда: из #token=… в URL (сохраняем) либо из localStorage. */
+export function getDashToken(): string | null {
+  try {
+    const m = window.location.hash.match(/token=([^&]+)/);
+    if (m) {
+      localStorage.setItem(DASH_TOKEN_KEY, m[1]);
+      // убираем токен из адресной строки, чтобы не светился
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      return m[1];
+    }
+    return localStorage.getItem(DASH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearDashToken() {
+  try {
+    localStorage.removeItem(DASH_TOKEN_KEY);
+  } catch {
+    /* noop */
+  }
+}
+
+/** Мы в режиме веб-дашборда (вне Telegram)? */
+export function isDashboardMode(): boolean {
+  return !tg.initData && !!getDashToken();
+}
 
 export class ApiError extends Error {
   status: number;
@@ -19,10 +52,11 @@ async function request<T = any>(
   body?: unknown,
 ): Promise<T> {
   const initData = tg.initData || '';
+  const dashToken = initData ? null : getDashToken();
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
-      Authorization: `tma ${initData}`,
+      Authorization: dashToken ? `Bearer ${dashToken}` : `tma ${initData}`,
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -209,6 +243,7 @@ export const api = {
         {},
       ),
     panelStatus: () => request<any>('GET', '/api/admin/panel-status'),
+    serversHealth: () => request<ServerHealth[]>('GET', '/api/admin/servers/health'),
     users: (limit = 100) => request<any[]>('GET', `/api/admin/users?limit=${limit}`),
     userDetail: (userId: number) => request<AdminUserDetail>('GET', `/api/admin/users/${userId}`),
     deleteUser: (userId: number) => request('DELETE', `/api/admin/users/${userId}`),
@@ -225,6 +260,28 @@ export type AdminSearchResult = {
   matched_value: string;
   username?: string;
   full_name?: string;
+};
+
+export type ServerHealth = {
+  id: number;
+  name: string;
+  online: boolean;
+  cpu_percent?: number;
+  cpu_cores?: number;
+  load?: number[];
+  mem_used?: number;
+  mem_total?: number;
+  disk_used?: number;
+  disk_total?: number;
+  uptime?: number;
+  net_up_speed?: number;
+  net_down_speed?: number;
+  net_sent?: number;
+  net_recv?: number;
+  xray_state?: string;
+  xray_version?: string;
+  tcp_count?: number;
+  udp_count?: number;
 };
 
 export type AdminUserDetail = {

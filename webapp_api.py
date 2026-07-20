@@ -268,6 +268,24 @@ async def auth_middleware(request: web.Request, handler):
             return err("Внутренняя ошибка сервера", 500)
 
     auth = request.headers.get("Authorization", "")
+
+    # Веб-дашборд: подписанный токен, выданный ботом администратору
+    # (работает вне Telegram — в обычном браузере на компьютере).
+    if auth.startswith("Bearer "):
+        admin_id = B.verify_dashboard_token(auth[7:].strip())
+        if not admin_id:
+            return err("Не авторизован: токен дашборда неверен или истёк", 401)
+        request["tg_user"] = {"id": admin_id, "first_name": "Admin"}
+        request["user_id"] = admin_id
+        await B.init_supabase()
+        try:
+            return await handler(request)
+        except web.HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"API error {request.method} {request.path}: {e}")
+            return err("Внутренняя ошибка сервера", 500)
+
     if not auth.startswith("tma "):
         return err("Не авторизован: нет initData", 401)
     verified = verify_init_data(auth[4:], B.BOT_TOKEN)
@@ -1742,6 +1760,71 @@ async def api_admin_panel_status(request: web.Request) -> web.Response:
     return ok({"servers": result, "totals": totals})
 
 
+async def api_admin_servers_health(request: web.Request) -> web.Response:
+    """Здоровье «железа» всех нод: CPU, RAM, диск, аптайм, сеть, версия xray.
+
+    Данные берутся из панели каждой ноды (/server/status) — агенты не нужны.
+    Панели кешируются по URL: France/Finland живут на одной панели входа."""
+    servers = await B.load_servers_from_supabase()
+    seen: Dict[str, Any] = {}
+    result = []
+    for s in servers:
+        key = (s.get("panel_url") or "").rstrip("/")
+        if key in seen:
+            st = seen[key]
+        else:
+            xui = B.XUIApi(s)
+            try:
+                st = await xui.server_status()
+            except Exception as e:
+                logger.warning(f"health {s.get('name')}: {e}")
+                st = None
+            finally:
+                await xui.close()
+            seen[key] = st
+
+        if not st:
+            result.append({"id": s.get("id"), "name": s.get("name"), "online": False})
+            continue
+
+        def num(v, default=0):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        cpu = st.get("cpu")
+        mem = st.get("mem") or {}
+        disk = st.get("disk") or {}
+        net_io = st.get("netIO") or {}
+        net_tr = st.get("netTraffic") or {}
+        xray = st.get("xray") or {}
+        loads = st.get("loads") or []
+
+        result.append({
+            "id": s.get("id"),
+            "name": s.get("name"),
+            "online": True,
+            "cpu_percent": round(num(cpu), 1),
+            "cpu_cores": st.get("cpuCores") or st.get("logicalPro"),
+            "load": [round(num(x), 2) for x in loads[:3]],
+            "mem_used": num(mem.get("current")),
+            "mem_total": num(mem.get("total")),
+            "disk_used": num(disk.get("current")),
+            "disk_total": num(disk.get("total")),
+            "uptime": int(num(st.get("uptime"))),
+            "net_up_speed": num(net_io.get("up")),
+            "net_down_speed": num(net_io.get("down")),
+            "net_sent": num(net_tr.get("sent")),
+            "net_recv": num(net_tr.get("recv")),
+            "xray_state": xray.get("state"),
+            "xray_version": xray.get("version"),
+            "tcp_count": st.get("tcpCount"),
+            "udp_count": st.get("udpCount"),
+        })
+    return ok(result)
+
+
 async def api_sub_stats(request: web.Request) -> web.Response:
     """Трафик и онлайн-статус подписки пользователя — из панели 3x-ui."""
     user_id = request["user_id"]
@@ -2105,6 +2188,7 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_delete("/api/admin/servers/{server_id}", api_admin_server_delete)
     r.add_post("/api/admin/servers/{server_id}/test", api_admin_server_test)
     r.add_get("/api/admin/panel-status", api_admin_panel_status)
+    r.add_get("/api/admin/servers/health", api_admin_servers_health)
     r.add_get("/api/admin/users", api_admin_users)
     r.add_get("/api/admin/search", api_admin_search)
     r.add_get("/api/admin/users/{user_id}", api_admin_user_detail)

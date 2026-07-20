@@ -72,6 +72,37 @@ XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "
 # Публичная оферта и политика конфиденциальности встроены в приложение
 # (webapp/src/lib/legal.ts, просмотр — webapp/src/pages/Legal.tsx, RU/EN).
 
+# ====================== ВЕБ-ДАШБОРД (админский сайт) ======================
+# Дашборд живёт на отдельном поддомене и авторизуется одноразовой подписанной
+# ссылкой, которую выдаёт бот администратору. Никаких новых паролей: подпись
+# HMAC на BOT_TOKEN, срок жизни ограничен.
+DASHBOARD_URL: str = (os.getenv("DASHBOARD_URL") or "").rstrip("/")
+DASHBOARD_TOKEN_TTL_HOURS: int = int(os.getenv("DASHBOARD_TOKEN_TTL_HOURS") or 168)  # 7 дней
+
+def dashboard_token(admin_id: int, ttl_hours: Optional[int] = None) -> str:
+    """Подписанный токен входа в дашборд: '<id>.<expiry>.<подпись>'."""
+    import hmac as _hmac, hashlib as _hashlib
+    exp = int(time.time()) + (ttl_hours or DASHBOARD_TOKEN_TTL_HOURS) * 3600
+    payload = f"{admin_id}.{exp}"
+    sig = _hmac.new(BOT_TOKEN.encode(), payload.encode(), _hashlib.sha256).hexdigest()[:40]
+    return f"{payload}.{sig}"
+
+def verify_dashboard_token(token: str) -> Optional[int]:
+    """Проверяет токен дашборда. Возвращает admin_id или None."""
+    import hmac as _hmac, hashlib as _hashlib
+    try:
+        uid_s, exp_s, sig = token.split(".")
+        payload = f"{uid_s}.{exp_s}"
+        expected = _hmac.new(BOT_TOKEN.encode(), payload.encode(), _hashlib.sha256).hexdigest()[:40]
+        if not _hmac.compare_digest(sig, expected):
+            return None
+        if int(exp_s) < int(time.time()):
+            return None
+        uid = int(uid_s)
+        return uid if is_admin(uid) else None
+    except Exception:
+        return None
+
 # ====================== РЕФЕРАЛЬНАЯ ПРОГРАММА ======================
 # Баллы начисляются ТОЛЬКО когда приглашённый друг оплатил подписку
 # (+REF_POINTS_PURCHASE за его первую покупку). Просто за запуск бота по
@@ -1212,6 +1243,28 @@ class XUIApi:
         except Exception as e:
             logger.error(f"❌ Ошибка list_inbounds ({self.server.get('name')}): {e}")
         return []
+
+    async def server_status(self) -> Optional[dict]:
+        """Метрики хоста панели: CPU, RAM, диск, аптайм, сеть, состояние xray.
+
+        Панель 3x-ui отдаёт их по /server/status — это позволяет мониторить
+        «железо» всех нод в дашборде без установки каких-либо агентов."""
+        if not self.cookies and not await self.login():
+            return None
+        headers = {"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"}
+        if self.csrf_token:
+            headers["X-CSRF-TOKEN"] = self.csrf_token
+        try:
+            r = await self.client.post(
+                f"{self.base_url}/server/status", cookies=self.cookies, headers=headers
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"):
+                    return data.get("obj") or {}
+        except Exception as e:
+            logger.warning(f"server_status ({self.server.get('name')}): {e}")
+        return None
 
     async def get_online_emails(self) -> List[str]:
         """Список email клиентов, которые онлайн прямо сейчас."""
@@ -2368,6 +2421,31 @@ def webapp_inline_keyboard() -> Optional[InlineKeyboardMarkup]:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Открыть приложение", web_app=WebAppInfo(url=webapp_url))]
     ])
+
+@router.message(Command("dashboard", "panel", "admin"))
+async def cmd_dashboard(message: Message):
+    """Выдаёт администратору ссылку для входа в веб-дашборд."""
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        return
+    if not DASHBOARD_URL:
+        await message.answer(
+            "⚠️ Дашборд не настроен: не задан <code>DASHBOARD_URL</code> в .env",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    token = dashboard_token(user_id)
+    link = f"{DASHBOARD_URL}/#token={token}"
+    days = DASHBOARD_TOKEN_TTL_HOURS // 24
+    await message.answer(
+        "🖥 <b>Веб-дашборд Gigabyte</b>\n\n"
+        "Ссылка для входа (открывайте в браузере на компьютере):\n"
+        f"{link}\n\n"
+        f"<i>Ссылка личная и действует {days} дн. Никому её не передавайте — "
+        f"она даёт полный доступ к управлению.</i>",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):

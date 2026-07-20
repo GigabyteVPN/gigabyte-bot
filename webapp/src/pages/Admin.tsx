@@ -1757,6 +1757,109 @@ function ServerEditor({ server, onClose, onSaved }: { server: any | null; onClos
   );
 }
 
+// ============================================================
+//  Здоровье «железа» нод: CPU / RAM / диск / сеть / аптайм
+//  Данные берутся из панели каждой ноды — агенты не нужны.
+// ============================================================
+const fmtUptime = (sec?: number) => {
+  if (!sec) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return d > 0 ? `${d}д ${h}ч` : h > 0 ? `${h}ч ${m}м` : `${m}м`;
+};
+
+const Meter = ({ label, used, total, unit = 'bytes', warn = 80 }: {
+  label: string; used?: number; total?: number; unit?: 'bytes' | 'percent'; warn?: number;
+}) => {
+  const pct = unit === 'percent' ? (used || 0) : total ? ((used || 0) / total) * 100 : 0;
+  const color = pct >= 90 ? '#FF453A' : pct >= warn ? '#FF9F0A' : '#32D74B';
+  return (
+    <div>
+      <div className="flex justify-between text-[12px] mb-1">
+        <span className="text-white/60">{label}</span>
+        <span className="font-semibold" style={{ color }}>
+          {unit === 'percent'
+            ? `${Math.round(pct)}%`
+            : `${formatBytes(used || 0)} / ${formatBytes(total || 0)}`}
+        </span>
+      </div>
+      <div className="h-1.5 w-full bg-white/[0.08] rounded-full overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${Math.min(pct, 100)}%` }}
+          transition={{ type: 'spring', damping: 26, stiffness: 120 }}
+          className="h-full rounded-full"
+          style={{ background: color, boxShadow: `0 0 8px ${color}80` }}
+        />
+      </div>
+    </div>
+  );
+};
+
+function ServersHealth() {
+  const { data, loading, reload } = useAsyncData(() => api.admin.serversHealth());
+  if (loading && !data) return <Spinner />;
+  const list = data || [];
+  return (
+    <Section title="Здоровье серверов">
+      <div className="flex flex-col gap-2.5">
+        {list.length === 0 && <Card className="p-5 text-center text-[#8E8E93]">Нет данных</Card>}
+        {list.map((s) => (
+          <Card key={s.id} className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span
+                  className={cn('w-2.5 h-2.5 rounded-full shrink-0', s.online ? 'bg-[#32D74B] dot-pulse' : 'bg-[#FF453A]')}
+                />
+                <span className="text-[16px] font-semibold text-white truncate emoji-flag">{s.name}</span>
+              </div>
+              <div className="text-[12px] text-white/45 shrink-0">
+                {s.online ? `аптайм ${fmtUptime(s.uptime)}` : 'недоступен'}
+              </div>
+            </div>
+            {s.online ? (
+              <>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-3">
+                  <Meter label={`CPU${s.cpu_cores ? ` · ${s.cpu_cores} ядер` : ''}`} used={s.cpu_percent} unit="percent" />
+                  <Meter label="RAM" used={s.mem_used} total={s.mem_total} />
+                  <Meter label="Диск" used={s.disk_used} total={s.disk_total} warn={85} />
+                  <div>
+                    <div className="text-[12px] text-white/60 mb-1">Сеть сейчас</div>
+                    <div className="text-[13px] font-semibold text-white">
+                      ↓ {formatBytes(s.net_down_speed || 0)}/с · ↑ {formatBytes(s.net_up_speed || 0)}/с
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 pt-3 border-t border-white/[0.06] text-[12px] text-white/50">
+                  <span>
+                    xray:{' '}
+                    <b className={s.xray_state === 'running' ? 'text-[#32D74B]' : 'text-[#FF6961]'}>
+                      {s.xray_state || '—'}
+                    </b>
+                    {s.xray_version ? ` ${s.xray_version}` : ''}
+                  </span>
+                  {s.load && s.load.length > 0 && <span>LA: {s.load.join(' / ')}</span>}
+                  {s.tcp_count != null && <span>TCP: {s.tcp_count}</span>}
+                  <span>трафик: ↓{formatBytes(s.net_recv || 0)} ↑{formatBytes(s.net_sent || 0)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-[13px] text-[#FF6961]">Панель не отвечает — проверьте сервер</div>
+            )}
+          </Card>
+        ))}
+        <button
+          onClick={() => { hapticFeedback.impactOccurred('light'); reload(); }}
+          className="self-start px-4 py-2 btn-glass rounded-full text-[13px] font-semibold text-white/80 active:scale-95 transition-transform"
+        >
+          Обновить метрики
+        </button>
+      </div>
+    </Section>
+  );
+}
+
 function ServersPage() {
   const { data: servers, loading, reload } = useAsyncData(() => api.admin.servers());
   const { data: status, loading: statusLoading, reload: reloadStatus } = useAsyncData(() => api.admin.panelStatus());
@@ -1900,6 +2003,8 @@ function ServersPage() {
           </div>
         </div>
       </div>
+
+      <ServersHealth />
 
       <Section title="Операции">
         <Card className="p-4 flex flex-col gap-3">

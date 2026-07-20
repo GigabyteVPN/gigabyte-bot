@@ -4,7 +4,7 @@ import { AnimatePresence } from 'motion/react';
 import { FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy, ChevronRight } from 'lucide-react';
 import { BottomNav, NavTab } from './components/layout/BottomNav';
 import { initTelegramApp, tg, hapticFeedback } from './lib/telegram';
-import { api, Bootstrap, ApiError } from './lib/api';
+import { api, Bootstrap, ApiError, getDashToken } from './lib/api';
 import { AppContext } from './lib/AppContext';
 import { t, LANG } from './lib/i18n';
 import { TERMS, PRIVACY } from './lib/legal';
@@ -42,6 +42,28 @@ function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => voi
       >
         {t('common.retry')}
       </button>
+    </div>
+  );
+}
+
+/** Экран входа в веб-дашборд: открыт в браузере, токена нет.
+ *  Токен выдаёт бот командой /dashboard — никаких паролей. */
+function DashboardLogin() {
+  return (
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center px-6 text-center gap-6">
+      <img src={logoUrl} alt="Gigabyte" className="w-[150px] h-[150px] object-contain drop-shadow-[0_10px_50px_rgba(10,132,255,0.5)]" />
+      <div>
+        <h1 className="text-[26px] font-bold text-white tracking-tight">Панель управления</h1>
+        <p className="text-[15px] text-[#8E8E93] mt-3 max-w-[380px] leading-relaxed">
+          Чтобы войти, откройте бота в Telegram и отправьте команду{' '}
+          <code className="text-[#4DA6FF] font-mono">/dashboard</code> — он пришлёт персональную ссылку
+          для входа.
+        </p>
+      </div>
+      <div className="glass rounded-3xl px-5 py-4 max-w-[420px] text-[13px] text-white/60 leading-relaxed">
+        Вход без паролей: ссылка подписана токеном бота и действует ограниченное время.
+        Доступ только у администраторов.
+      </div>
     </div>
   );
 }
@@ -175,6 +197,9 @@ export default function App() {
     } catch (e) {}
     load();
   }, [load]);
+
+  // Веб-дашборд открыт в браузере без токена — показываем экран входа
+  if (!tg.initData && !getDashToken()) return <DashboardLogin />;
 
   if (loading) return <Spinner />;
   if (error || !boot) return <ErrorScreen message={error || 'Ошибка'} onRetry={() => load()} />;
