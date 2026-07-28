@@ -1,6 +1,7 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, FileText, Lock } from 'lucide-react';
 import { LegalDoc } from '../lib/legal';
+import { useLockBodyScroll } from '../lib/scroll-lock';
 
 /** Полноэкранный просмотр юридического документа в стиле приложения. */
 export default function Legal({
@@ -13,6 +14,7 @@ export default function Legal({
   onClose: () => void;
 }) {
   const Icon = kind === 'terms' ? FileText : Lock;
+  useLockBodyScroll(true); // документ открыт поверх — фон не скроллим
   return (
     <motion.div
       initial={{ opacity: 0, x: 40 }}

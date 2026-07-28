@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { api, Ticket, Tariff, AdminSearchResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
@@ -7,6 +7,7 @@ import { cn, formatBytes } from '../lib/utils';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { motion } from 'motion/react';
 import { BottomNav, NavTab } from '../components/layout/BottomNav';
+import { ScrollLock, useLockBodyScroll } from '../lib/scroll-lock';
 import {
   Users,
   Gauge,
@@ -31,6 +32,8 @@ import {
   Plus,
   Settings2,
   ChevronLeft,
+  Monitor,
+  ExternalLink,
 } from 'lucide-react';
 
 // ============================================================
@@ -168,6 +171,7 @@ function useAsyncData<T>(loader: () => Promise<T>, deps: unknown[] = []) {
 
 // Bottom-sheet в плотном стекле
 function Sheet({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  useLockBodyScroll(true); // шторка открыта — фон под ней не прокручивается
   return (
     <div className="fixed inset-0 z-[210] flex items-end justify-center bg-black/60 backdrop-blur-md" onClick={onClose}>
       <motion.div
@@ -349,6 +353,51 @@ function MethodDonut({ methods }: { methods: Record<string, { count: number; sum
 //  ОБЗОР — полноценный дашборд
 // ============================================================
 
+// Кнопка перехода в полноценный веб-дашборд (открывается в браузере на
+// компьютере). Ссылку с одноразовым токеном выдаёт бэкенд для текущего админа.
+function OpenDashboardButton() {
+  const [busy, setBusy] = useState(false);
+  const open = async () => {
+    if (busy) return;
+    setBusy(true);
+    hapticFeedback.impactOccurred('light');
+    try {
+      const { url } = await api.admin.dashboardLink();
+      const anyTg = tg as any;
+      if (typeof anyTg.openLink === 'function') anyTg.openLink(url);
+      else window.open(url, '_blank');
+    } catch (e: any) {
+      (tg as any).showAlert?.(e?.message || 'Не удалось получить ссылку на дашборд');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      onClick={open}
+      disabled={busy}
+      className="w-full rounded-[24px] p-4 flex items-center gap-3.5 active:scale-[0.99] transition-transform relative overflow-hidden"
+      style={{
+        background: 'linear-gradient(135deg, rgba(10,132,255,0.20), rgba(94,92,230,0.10))',
+        border: '1px solid rgba(255,255,255,0.10)',
+      }}
+    >
+      <div className="w-11 h-11 rounded-2xl bg-[#0A84FF]/20 flex items-center justify-center shrink-0">
+        <Monitor className="w-5 h-5 text-[#0A84FF]" />
+      </div>
+      <div className="flex-1 text-left">
+        <div className="text-[16px] font-semibold text-white">Веб-дашборд на компьютере</div>
+        <div className="text-[13px] text-white/50">Открыть полную панель в браузере</div>
+      </div>
+      {busy ? (
+        <Loader2 className="w-5 h-5 text-white/60 animate-spin shrink-0" />
+      ) : (
+        <ExternalLink className="w-5 h-5 text-white/40 shrink-0" />
+      )}
+    </button>
+  );
+}
+
 function OverviewPage() {
   const { data: stats, loading, reload } = useAsyncData(() => api.admin.stats());
 
@@ -395,11 +444,12 @@ function OverviewPage() {
 
       {/* Финансовый hero-блок */}
       <div
-        className="rounded-[32px] p-6 relative overflow-hidden"
+        className="rounded-[40px] p-6 relative overflow-hidden"
         style={{
           background: 'linear-gradient(150deg, rgba(10,132,255,0.32), rgba(94,92,230,0.18) 55%, rgba(255,255,255,0.05))',
-          backdropFilter: 'blur(28px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
+          // backdrop-filter здесь убран намеренно: за блоком плоский фон
+          // страницы, поэтому размытие ничего не даёт, зато WebKit рисует его
+          // прямоугольником и он торчал квадратным углом за скруглением.
           border: '1px solid rgba(255,255,255,0.14)',
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
@@ -417,13 +467,16 @@ function OverviewPage() {
             ['30 дней', stats.finance.month],
             ['Всего', stats.finance.total],
           ].map(([label, v]) => (
-            <div key={label as string} className="glass-inner rounded-2xl px-3 py-2.5">
+            <div key={label as string} className="glass-inner rounded-[22px] px-3 py-2.5">
               <div className="text-[11px] text-white/50 font-medium uppercase tracking-wider">{label}</div>
               <div className="text-[16px] font-bold mt-0.5">₽{Number(v).toLocaleString('ru-RU')}</div>
             </div>
           ))}
         </div>
       </div>
+
+      {/* Переход в веб-дашборд на компьютере */}
+      <OpenDashboardButton />
 
       {/* График выручки за 14 дней */}
       <Section title="Выручка · 14 дней">
@@ -805,8 +858,9 @@ function StarsTab() {
         className="rounded-[32px] p-6 relative overflow-hidden"
         style={{
           background: 'linear-gradient(150deg, rgba(255,159,10,0.28), rgba(255,255,255,0.05))',
-          backdropFilter: 'blur(28px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
+          // backdrop-filter здесь убран намеренно: за блоком плоский фон
+          // страницы, поэтому размытие ничего не даёт, зато WebKit рисует его
+          // прямоугольником и он торчал квадратным углом за скруглением.
           border: '1px solid rgba(255,255,255,0.14)',
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
@@ -1365,6 +1419,7 @@ function UsersTab() {
 
       {confirm && (
         <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 backdrop-blur-md px-6" onClick={() => setConfirm(null)}>
+          <ScrollLock />
           <div className="glass-sheet rounded-[32px] p-6 w-full max-w-[360px]" onClick={(e) => e.stopPropagation()}>
             <div className="text-[18px] font-bold text-white mb-2">Удалить пользователя {confirm.user_id}?</div>
             <div className="text-[14px] text-white/55 mb-5">
@@ -1681,7 +1736,7 @@ function ServerEditor({ server, onClose, onSaved }: { server: any | null; onClos
             />
           </div>
         </div>
-        {field('IP сервера (для ссылки-подписки)', 'ip', { placeholder: '185.93.105.47', mono: true })}
+        {field('IP сервера (для ссылки-подписки)', 'ip', { placeholder: 'vpn.gigabytebot.com', mono: true })}
         {field('URL панели 3x-ui', 'panel_url', { placeholder: 'https://IP:PORT/path', mono: true })}
         <div className="grid grid-cols-2 gap-3">
           {field('Логин панели', 'panel_login', { placeholder: 'admin' })}
@@ -1889,6 +1944,166 @@ function ServersHealth() {
   );
 }
 
+// Мастер «Добавить ноду одной кнопкой»: поднимает новый выход (страну) или
+// входную РУ-ноду. Бэкенд провижинит по SSH, здесь — форма, префлайт и живой лог.
+function AddNodeWizard({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [mode, setMode] = useState<'exit' | 'entry'>('exit');
+  const [name, setName] = useState('');
+  const [ip, setIp] = useState('');
+  const [password, setPassword] = useState('');
+  const [domain, setDomain] = useState('');
+  const [makeActive, setMakeActive] = useState(false);
+  const [pre, setPre] = useState<any>(null);
+  const [preBusy, setPreBusy] = useState(false);
+  const [job, setJob] = useState<{ id: string; status: string; log: string[]; error: string | null; result: any } | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  const running = job?.status === 'running';
+  const finished = job?.status === 'done';
+
+  const preflight = async () => {
+    if (!ip.trim()) { tg.showAlert('Укажите IP новой ноды'); return; }
+    setPreBusy(true); setPre(null);
+    try {
+      setPre(await api.admin.nodePreflight({ mode, ip: ip.trim(), domain: domain.trim() }));
+    } catch (e: any) { tg.showAlert(e.message); }
+    finally { setPreBusy(false); }
+  };
+
+  const start = async () => {
+    if (!name.trim() || !ip.trim() || !password) { tg.showAlert('Заполните название, IP и root-пароль'); return; }
+    if (mode === 'entry' && !domain.trim()) { tg.showAlert('Для входной ноды нужен домен (A-запись на её IP)'); return; }
+    hapticFeedback.impactOccurred('medium');
+    try {
+      const { job_id } = await api.admin.nodeProvision({
+        mode, ip: ip.trim(), password, domain: domain.trim(), name: name.trim(), make_active: makeActive,
+      });
+      setJob({ id: job_id, status: 'running', log: [], error: null, result: null });
+    } catch (e: any) { tg.showAlert(e.message); }
+  };
+
+  useEffect(() => {
+    if (!job?.id || job.status !== 'running') return;
+    let alive = true; let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const s = await api.admin.nodeStatus(job.id);
+        if (!alive) return;
+        setJob((j) => (j ? { ...j, status: s.status, log: s.log, error: s.error, result: s.result } : j));
+        if (s.status === 'done') { hapticFeedback.notificationOccurred('success'); onDone(); }
+        else if (s.status === 'running') timer = setTimeout(poll, 2000);
+      } catch { if (alive) timer = setTimeout(poll, 2500); }
+    };
+    poll();
+    return () => { alive = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [job?.log?.length]);
+
+  const inputCls = 'w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-[15px] text-white placeholder-white/30 focus:border-[#0A84FF] outline-none transition-colors';
+
+  return (
+    <div className="fixed inset-0 z-[300] bg-black/60 backdrop-blur-xl flex items-end sm:items-center justify-center p-0 sm:p-4"
+         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
+      <div className="glass-sheet w-full max-w-[460px] rounded-t-[32px] sm:rounded-[32px] max-h-[92vh] overflow-y-auto p-5 pb-8">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-[22px] font-bold">Добавить ноду</h3>
+          <button onClick={onClose} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center active:scale-90 transition-transform">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        </div>
+
+        {!job ? (
+          <div className="flex flex-col gap-4">
+            {/* Тип ноды */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-black/30 rounded-2xl">
+              {([['exit', '🌍 Выход (страна)'], ['entry', '🇷🇺 Вход (РУ)']] as const).map(([m, label]) => (
+                <button key={m} onClick={() => { setMode(m); setPre(null); }}
+                  className={cn('py-2.5 rounded-xl text-[14px] font-semibold transition-colors',
+                    mode === m ? 'bg-[#0A84FF] text-white' : 'text-white/60')}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="text-[13px] text-white/50 leading-snug -mt-1 px-1">
+              {mode === 'exit'
+                ? 'Новая страна для пользователей. Поднимем выход и подвяжем к Москве — сразу появится в боте.'
+                : 'Новый российский вход (клон Москвы) со своим доменом. Можно сразу сделать активным входом.'}
+            </div>
+
+            <input className={inputCls} placeholder={mode === 'exit' ? 'Название, напр. 🇳🇱 Нидерланды' : 'Название, напр. 🇷🇺 Москва-2'} value={name} onChange={(e) => setName(e.target.value)} />
+            <input className={inputCls} placeholder="IP новой ноды" value={ip} onChange={(e) => setIp(e.target.value)} inputMode="decimal" />
+            <input className={inputCls} type="password" placeholder="root-пароль ноды (от хостера)" value={password} onChange={(e) => setPassword(e.target.value)} />
+            {mode === 'entry' && (
+              <>
+                <input className={inputCls} placeholder="Домен, напр. vpn2.gigabytebot.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
+                <label className="flex items-center gap-3 px-1 text-[14px] text-white/80">
+                  <input type="checkbox" checked={makeActive} onChange={(e) => setMakeActive(e.target.checked)} className="w-5 h-5 accent-[#0A84FF]" />
+                  Сразу перевести все страны на этот вход
+                </label>
+              </>
+            )}
+
+            {pre && (
+              <div className="rounded-2xl bg-black/30 border border-white/10 p-3.5 text-[13px] flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span className={pre.ssh_reachable ? 'text-[#32D74B]' : 'text-[#FF453A]'}>{pre.ssh_reachable ? '✓' : '✗'}</span>
+                  SSH-порт ноды {pre.ssh_reachable ? 'доступен' : 'недоступен'}
+                </div>
+                {mode === 'entry' && (
+                  <div className="flex items-center gap-2">
+                    <span className={pre.dns_ok ? 'text-[#32D74B]' : 'text-[#FF9F0A]'}>{pre.dns_ok ? '✓' : '!'}</span>
+                    DNS {pre.dns_ok ? 'указывает на IP' : `→ ${pre.dns_resolved || 'нет записи'} (ожидался ваш IP)`}
+                  </div>
+                )}
+                {pre.tools_error && <div className="text-[#FF453A]">⚠ {pre.tools_error}</div>}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-1">
+              <button onClick={preflight} disabled={preBusy}
+                className="flex-1 py-3.5 rounded-full bg-white/[0.08] text-white font-semibold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-50">
+                {preBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Activity className="w-5 h-5" />} Проверить
+              </button>
+              <button onClick={start}
+                className="flex-[1.4] py-3.5 btn-primary rounded-full text-white font-bold text-[15px] active:scale-[0.98] transition-transform flex items-center justify-center gap-2">
+                <Server className="w-5 h-5" /> Запустить
+              </button>
+            </div>
+            <div className="text-[12px] text-white/40 text-center px-2">Провижининг занимает 2–4 минуты. Прогресс покажем здесь и в чате бота.</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              {running ? <Loader2 className="w-6 h-6 animate-spin text-[#0A84FF]" />
+                : finished ? <Check className="w-6 h-6 text-[#32D74B]" />
+                : <span className="text-[#FF453A] text-2xl leading-none">✗</span>}
+              <div className="text-[16px] font-semibold">
+                {running ? 'Поднимаю ноду…' : finished ? 'Нода готова ✅' : 'Ошибка провижининга'}
+              </div>
+            </div>
+            <div ref={logRef} className="rounded-2xl bg-black/50 border border-white/10 p-3 h-[300px] overflow-y-auto font-mono text-[12px] leading-relaxed text-white/70 whitespace-pre-wrap">
+              {(job.log || []).map((l, i) => (
+                <div key={i} className={cn(l.startsWith('✓') && 'text-[#32D74B]', l.startsWith('✗') && 'text-[#FF453A]', l.startsWith('▸') && 'text-[#4DA6FF]')}>{l}</div>
+              ))}
+              {running && <div className="text-white/30 animate-pulse">…</div>}
+            </div>
+            {job.error && <div className="text-[13px] text-[#FF453A] px-1">{job.error}</div>}
+            <button onClick={onClose}
+              className={cn('w-full py-3.5 rounded-full font-bold text-[15px] active:scale-[0.98] transition-transform',
+                finished ? 'btn-primary text-white' : 'bg-white/[0.08] text-white')}>
+              {running ? 'Свернуть (продолжит в фоне)' : 'Готово'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ServersPage() {
   const { data: servers, loading, reload } = useAsyncData(() => api.admin.servers());
   const { data: status, loading: statusLoading, reload: reloadStatus } = useAsyncData(() => api.admin.panelStatus());
@@ -1897,6 +2112,7 @@ function ServersPage() {
   const [reproving, setReproving] = useState(false);
   const [confirmRepro, setConfirmRepro] = useState(false);
   const [editor, setEditor] = useState<{ open: boolean; server: any | null } | null>(null);
+  const [addNode, setAddNode] = useState(false);
 
   const doReprovision = async () => {
     if (reproving) return;
@@ -1991,13 +2207,37 @@ function ServersPage() {
         </button>
       </div>
 
+      {addNode && (
+        <AddNodeWizard
+          onClose={() => setAddNode(false)}
+          onDone={() => { reload(); reloadStatus(); }}
+        />
+      )}
+
+      {/* Добавить ноду одной кнопкой */}
+      <button
+        onClick={() => { hapticFeedback.impactOccurred('light'); setAddNode(true); }}
+        className="w-full rounded-[24px] p-4 flex items-center gap-3.5 active:scale-[0.99] transition-transform text-left"
+        style={{ background: 'linear-gradient(135deg, rgba(10,132,255,0.22), rgba(94,92,230,0.10))', border: '1px solid rgba(255,255,255,0.10)' }}
+      >
+        <div className="w-11 h-11 rounded-2xl bg-[#0A84FF]/20 flex items-center justify-center shrink-0">
+          <Plus className="w-5 h-5 text-[#0A84FF]" />
+        </div>
+        <div className="flex-1">
+          <div className="text-[16px] font-semibold text-white">Добавить ноду одной кнопкой</div>
+          <div className="text-[13px] text-white/50">Новая страна (выход) или РУ-вход · автопровижининг</div>
+        </div>
+        <ChevronLeft className="w-5 h-5 text-white/30 rotate-180" />
+      </button>
+
       {/* Живой статус сети из панелей 3x-ui */}
       <div
         className="rounded-[32px] p-6 relative overflow-hidden"
         style={{
           background: 'linear-gradient(150deg, rgba(50,215,75,0.22), rgba(255,255,255,0.05))',
-          backdropFilter: 'blur(28px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(28px) saturate(1.6)',
+          // backdrop-filter здесь убран намеренно: за блоком плоский фон
+          // страницы, поэтому размытие ничего не даёт, зато WebKit рисует его
+          // прямоугольником и он торчал квадратным углом за скруглением.
           border: '1px solid rgba(255,255,255,0.14)',
           boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
         }}
@@ -2077,6 +2317,7 @@ function ServersPage() {
 
       {confirmRepro && (
         <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 backdrop-blur-md px-6" onClick={() => setConfirmRepro(false)}>
+          <ScrollLock />
           <div className="glass-sheet rounded-[32px] p-6 w-full max-w-[360px]" onClick={(e) => e.stopPropagation()}>
             <div className="text-[18px] font-bold text-white mb-2">Пересоздать все подписки?</div>
             <div className="text-[14px] text-white/55 mb-5">

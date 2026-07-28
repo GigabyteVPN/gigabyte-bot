@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /*?lang=
+
+# Поисковым роботам разрешаем всё; служебные параметры не индексируем,
+# чтобы не плодить дубли одной и той же страницы.
+
+User-agent: Yandex
+Allow: /
+Clean-param: lang&v
+
+Sitemap: https://gigabytebot.com/sitemap.xml
+Host: gigabytebot.com

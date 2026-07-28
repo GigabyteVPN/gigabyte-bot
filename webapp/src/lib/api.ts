@@ -105,6 +105,7 @@ export type Subscription = {
   id: number;
   sub_id: string;
   server: ServerInfo;
+  countries?: ServerInfo[]; // все страны одной ссылки (может быть несколько)
   expiry_date: number; // ms timestamp, 0 = бессрочно
   status: 'active' | 'expired';
   sub_link: string | null;
@@ -124,6 +125,25 @@ export type ReferralSummary = {
   points_purchase: number;
   redeem_cost: number;
   redeem_months: number;
+};
+
+export type ReviewItem = {
+  id: string;
+  name: string;
+  rating: number;
+  text: string;
+  date: string;
+  mine: boolean;
+};
+
+export type ReviewsSummary = {
+  average: number;
+  count: number;
+  distribution: Record<string, number>;
+  mine: { rating: number | null; text: string; rated_at: string | null };
+  items: ReviewItem[];
+  limit: number;
+  unavailable?: boolean;
 };
 
 export const apiBase = API_BASE;
@@ -218,6 +238,9 @@ export const api = {
     ),
   setReminders: (enabled: boolean) =>
     request<{ enabled: boolean }>('POST', '/api/settings/reminders', { enabled }),
+  reviews: () => request<ReviewsSummary>('GET', '/api/reviews'),
+  postReview: (rating: number, text: string) =>
+    request<ReviewsSummary>('POST', '/api/reviews', { rating, text }),
   shareSubQr: (subId: string) => request<{ sent: boolean }>('POST', `/api/subscriptions/${subId}/qr/share`, {}),
 
   // ---------- Админские методы ----------
@@ -260,6 +283,15 @@ export const api = {
     search: (q: string) => request<AdminSearchResult[]>('GET', `/api/admin/search?q=${encodeURIComponent(q)}`),
     reprovision: (serverId?: number) =>
       request<{ started: boolean; active: number }>('POST', '/api/admin/reprovision', serverId ? { server_id: serverId } : {}),
+    dashboardLink: () => request<{ url: string; ttl_hours: number }>('GET', '/api/admin/dashboard-link'),
+    nodePreflight: (body: { mode: 'entry' | 'exit'; ip: string; domain?: string }) =>
+      request<{ ssh_reachable: boolean; dns_ok: boolean | null; dns_resolved?: string; ready: boolean; tools_error?: string }>(
+        'POST', '/api/admin/nodes/preflight', body),
+    nodeProvision: (body: { mode: 'entry' | 'exit'; ip: string; password: string; domain?: string; name: string; flag?: string; make_active?: boolean }) =>
+      request<{ job_id: string }>('POST', '/api/admin/nodes/provision', body),
+    nodeStatus: (jobId: string) =>
+      request<{ status: 'running' | 'done' | 'error'; log: string[]; result: any; error: string | null; name: string }>(
+        'GET', `/api/admin/nodes/provision/${jobId}`),
   },
 };
 

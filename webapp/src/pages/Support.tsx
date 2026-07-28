@@ -6,9 +6,12 @@ import { cn } from '../lib/utils';
 import { t, locale } from '../lib/i18n';
 import { SectionTitle } from '../components/SectionTitle';
 import { motion, AnimatePresence } from 'motion/react';
+import Reviews from '../components/Reviews';
+import { ReviewsSummary } from '../lib/api';
 import {
   MessageSquarePlus,
   Globe,
+  Star,
   ChevronRight,
   ChevronLeft,
   Send,
@@ -19,7 +22,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 
-type View = 'main' | 'chat' | 'country';
+type View = 'main' | 'chat' | 'country' | 'reviews';
 
 const statusBadge = (status: string) =>
   status === 'open' ? (
@@ -349,6 +352,8 @@ export default function Support() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>('main');
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  // сводку по отзывам держим здесь, чтобы на кнопке сразу был средний балл
+  const [reviews, setReviews] = useState<ReviewsSummary | null>(null);
 
   const load = useCallback(async (): Promise<Ticket[]> => {
     try {
@@ -365,6 +370,7 @@ export default function Support() {
 
   useEffect(() => {
     load();
+    api.reviews().then(setReviews).catch(() => {});
   }, [load]);
 
   const activeTicket = activeTicketId ? tickets.find((t) => t.ticket_id === activeTicketId) || null : null;
@@ -400,6 +406,10 @@ export default function Support() {
 
   if (view === 'country') {
     return <CountryPage countries={boot.countries} onBack={() => setView('main')} />;
+  }
+
+  if (view === 'reviews') {
+    return <Reviews onBack={() => setView('main')} onChanged={setReviews} />;
   }
 
   return (
@@ -441,6 +451,33 @@ export default function Support() {
             <div className="text-[14px] text-[#8E8E93]">{t('sup.countryHint')}</div>
           </div>
           <ChevronRight className="w-5 h-5 text-[#3C3C43]/60" />
+        </button>
+
+        <button
+          onClick={() => {
+            hapticFeedback.selectionChanged();
+            setView('reviews');
+          }}
+          className="ios-list p-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+        >
+          <div className="w-12 h-12 app-icon bg-gradient-to-b from-[#FFD60A]/45 to-[#FF9F0A]/15 rounded-full flex items-center justify-center shrink-0">
+            <Star className="w-6 h-6 text-[#FFD60A]" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-[18px] font-bold text-white">{t('rev.entry')}</div>
+            <div className="text-[14px] text-[#8E8E93] flex items-center gap-1.5">
+              {reviews && reviews.count > 0 ? (
+                <>
+                  <Star className="w-3.5 h-3.5 text-[#FFD60A] fill-[#FFD60A] shrink-0" />
+                  <span className="tabular-nums font-semibold text-white/80">{reviews.average.toFixed(1)}</span>
+                  <span className="truncate">· {t('rev.entryHint')}</span>
+                </>
+              ) : (
+                <span className="truncate">{t('rev.entryEmpty')}</span>
+              )}
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-[#3C3C43]/60 shrink-0" />
         </button>
       </div>
 

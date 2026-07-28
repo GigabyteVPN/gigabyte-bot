@@ -6,6 +6,10 @@ services:
       - .env
     networks:
       - internal
+    volumes:
+      # SSH-ключ и скрипт провижининга нод (для «добавить ноду» из дашборда).
+      # Только чтение: приватный ключ и скрипт монтируются, не пекутся в образ.
+      - ./provisioning:/app/provisioning:ro
     logging:
       driver: "json-file"
       options:
@@ -23,6 +27,8 @@ services:
       - ./nginx/sites:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
       - ./instructions:/usr/share/nginx/html/instructions:ro
+      - ./website:/usr/share/nginx/html/gigabytebot:ro
+      - ./certbot-www:/var/www/certbot
     depends_on:
       - bot
     networks:

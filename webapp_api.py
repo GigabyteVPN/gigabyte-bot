@@ -25,8 +25,9 @@ import json
 import logging
 import time
 import uuid as uuid_lib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from html import escape as html_escape
 from urllib.parse import parse_qsl
 
 from aiohttp import web
@@ -38,6 +39,37 @@ B: Any = None  # модуль bot.py, устанавливается в setup_we
 
 INIT_DATA_MAX_AGE = 24 * 3600  # сколько живёт подпись initData
 ONLINE_THRESHOLD_MS = 60_000   # клиент «онлайн», если lastOnline не старше 60 сек
+
+# ---- Провижининг нод «одной кнопкой» из дашборда ----
+import os as _os
+PROV_KEY        = _os.getenv("PROVISION_KEY", "/app/provisioning/prov_key")
+PROV_SCRIPT     = _os.getenv("PROVISION_SCRIPT", "/app/provisioning/provision-node.sh")
+PROV_WIRE       = _os.getenv("PROVISION_WIRE", "/app/provisioning/wire-exit.py")
+# Эталоны для клонирования: entry ← Москва (вход), exit ← Франция (выход).
+PROV_ENTRY_SRC  = _os.getenv("PROVISION_ENTRY_SOURCE_IP", "77.110.104.140")
+PROV_EXIT_SRC   = _os.getenv("PROVISION_EXIT_SOURCE_IP", "38.180.226.39")
+# Входная нода (Москва) — куда подвязываются новые выходы.
+PROV_ENTRY_IP   = _os.getenv("PROVISION_ENTRY_IP", "77.110.104.140")
+# Пароль от боевой базы панели — только через окружение, без значения по
+# умолчанию в коде: у репозитория есть удалённая копия на GitHub, и однажды
+# попавший в историю пароль оттуда уже не убрать.
+PROV_ENTRY_DSN  = _os.getenv("PROVISION_ENTRY_DSN", "")
+# Задания провижининга: job_id -> {status, log[], result, error, created}
+_NODE_JOBS: Dict[str, dict] = {}
+
+
+def _prov_available() -> Optional[str]:
+    """None если провижининг доступен, иначе строка с причиной недоступности."""
+    import shutil
+    if not _os.path.isfile(PROV_KEY):
+        return "нет ключа провижининга (provisioning/prov_key не смонтирован)"
+    if not _os.path.isfile(PROV_SCRIPT):
+        return "нет скрипта провижининга"
+    if not shutil.which("ssh") or not shutil.which("sshpass"):
+        return "в контейнере нет ssh/sshpass — пересоберите образ бота"
+    if not PROV_ENTRY_DSN:
+        return "не задан PROVISION_ENTRY_DSN — добавьте строку подключения к БД панели в .env"
+    return None
 
 
 def _online_emails_from_inbound(inbound: Optional[dict]) -> set:
@@ -365,6 +397,45 @@ async def api_accept_terms(request: web.Request) -> web.Response:
     return ok()
 
 
+# Кэш «в каких странах состоит sub_id» по панели (одна ссылка может вести
+# сразу в несколько стран — напр. Франция+Финляндия на входе Москвы).
+_SUBID_COUNTRIES_CACHE: Dict[str, Any] = {}
+_SUBID_CACHE_TTL = 45  # сек
+
+
+async def _panel_subid_servers(panel_servers: List[dict]) -> Optional[Dict[str, set]]:
+    """{sub_id: {server_id,...}} — в каких инбаундах (странах) панели состоит
+    каждый sub_id. Читаем клиентов каждого инбаунда панели напрямую. Кэш 45с."""
+    key = (panel_servers[0].get("panel_url") or "").rstrip("/")
+    now = time.time()
+    ent = _SUBID_COUNTRIES_CACHE.get(key)
+    if ent and now - ent["ts"] < _SUBID_CACHE_TTL:
+        return ent["map"]
+    result: Dict[str, set] = {}
+    xui = B.XUIApi(panel_servers[0])
+    try:
+        if not await xui.login():
+            return None
+        seen: Dict[Any, list] = {}
+        for srv in panel_servers:
+            ib = srv.get("inbound_id")
+            if ib is None:
+                continue
+            if ib not in seen:
+                seen[ib] = await xui.get_clients(ib)
+            for c in seen[ib]:
+                sid = c.get("subId")
+                if sid:
+                    result.setdefault(sid, set()).add(srv["id"])
+    except Exception as e:
+        logger.warning(f"countries lookup {key}: {e}")
+        return None
+    finally:
+        await xui.close()
+    _SUBID_COUNTRIES_CACHE[key] = {"ts": now, "map": result}
+    return result
+
+
 async def api_subscriptions(request: web.Request) -> web.Response:
     user_id = request["user_id"]
     res = await B.supabase.table("subscriptions").select(
@@ -373,30 +444,65 @@ async def api_subscriptions(request: web.Request) -> web.Response:
     servers = await B.load_servers_from_supabase()
     server_map = {s["id"]: s for s in servers}
     now_ms = int(time.time() * 1000)
+    rows = res.data or []
+
+    # Серверы по панели + панели, где есть подписки пользователя
+    panels: Dict[str, List[dict]] = {}
+    for s in servers:
+        panels.setdefault((s.get("panel_url") or "").rstrip("/"), []).append(s)
+    user_panels = {
+        (server_map[r["server_id"]].get("panel_url") or "").rstrip("/")
+        for r in rows if r.get("server_id") in server_map
+    }
+
+    # Живая карта sub_id → страны с каждой задействованной панели
+    subid_servers: Dict[str, set] = {}
+    for pu in user_panels:
+        m = await _panel_subid_servers(panels.get(pu) or [])
+        if not m:
+            continue
+        for sid, sset in m.items():
+            subid_servers.setdefault(sid, set()).update(sset)
+
+    # Одна ссылка (sub_id) = одна карточка со всеми странами
+    groups: Dict[str, dict] = {}
+    for s in rows:
+        g = groups.setdefault(s["sub_id"], {"row": s, "server_ids": set()})
+        g["server_ids"].add(s["server_id"])
+        # берём как «основную» строку самую свежую по сроку
+        if (s.get("expiry_date") or 0) > (g["row"].get("expiry_date") or 0):
+            g["row"] = s
+
     subs = []
-    for s in sorted(res.data or [], key=lambda x: x.get("expiry_date") or 0, reverse=True):
-        server = server_map.get(s["server_id"])
+    for sid, g in groups.items():
+        s = g["row"]
+        cids = set(subid_servers.get(sid) or set()) | g["server_ids"]
+        countries = [safe_server(server_map[c]) for c in cids if c in server_map]
+        countries.sort(key=lambda c: (c or {}).get("name") or "")
+        primary = server_map.get(s["server_id"]) or (
+            server_map.get(sorted(cids)[0]) if cids else None)
         expiry = s.get("expiry_date") or 0
         is_active = s.get("status") == "active" and (expiry == 0 or expiry > now_ms)
         subs.append({
             "id": s["id"],
-            "sub_id": s["sub_id"],
-            "server": safe_server(server) if server else {"id": s["server_id"], "name": "Сервер"},
+            "sub_id": sid,
+            "server": safe_server(primary) if primary else {"id": s["server_id"], "name": "Сервер"},
+            # Все страны, которые обслуживает эта ссылка (для отображения в аппе).
+            "countries": countries or ([safe_server(primary)] if primary else []),
             "expiry_date": expiry,
             "status": "active" if is_active else "expired",
-            # Идентификатор клиента в панели — пользователь называет его
-            # в поддержке, чтобы мы быстро нашли его подписку.
             "email": s.get("email"),
-            "sub_link": B.generate_subscription_link(server, s["sub_id"]) if server else None,
+            "sub_link": B.generate_subscription_link(primary, sid) if primary else None,
             "ics_url": (
-                f"/api/public/reminder.ics?sub_id={s['sub_id']}&t={ics_token(s['sub_id'])}"
+                f"/api/public/reminder.ics?sub_id={sid}&t={ics_token(sid)}"
                 if is_active and expiry > 0 else None
             ),
             "qr_url": (
-                f"/api/public/subqr.png?sub_id={s['sub_id']}&t={qr_token(s['sub_id'])}"
-                if is_active and server else None
+                f"/api/public/subqr.png?sub_id={sid}&t={qr_token(sid)}"
+                if is_active and primary else None
             ),
         })
+    subs.sort(key=lambda x: x["expiry_date"], reverse=True)
     return ok(subs)
 
 
@@ -1161,6 +1267,147 @@ async def api_settings_reminders(request: web.Request) -> web.Response:
             "Настройка недоступна: примените миграцию БД "
             "(migrations/2026-07-17_referral_reminders_lang.sql)", 503)
     return ok({"enabled": enabled})
+
+
+# ====================== ОТЗЫВЫ ======================
+# Отзывы видны всем пользователям приложения, поэтому наружу отдаём только
+# имя автора — ни username, ни идентификатор Telegram не публикуем.
+# Оценка учитывается в среднем балле всегда, а текст показывается только
+# после того, как человек его написал; администратор может убрать текст
+# (эндпоинт ниже), при этом сама оценка остаётся в статистике.
+
+REVIEW_TEXT_LIMIT = 500       # столько символов помещается в карточку
+REVIEWS_PAGE = 50             # сколько отзывов с текстом отдаём на экран
+
+
+def _review_author(user_row: Optional[dict]) -> str:
+    """Публичное имя автора: только первое слово из имени."""
+    if not user_row:
+        return "Пользователь"
+    full = (user_row.get("full_name") or "").strip()
+    if full:
+        return full.split()[0][:24]
+    username = (user_row.get("username") or "").strip()
+    if username:
+        return username[:24]
+    return "Пользователь"
+
+
+async def _reviews_payload(user_id: int) -> dict:
+    """Общая витрина отзывов: статистика, лента и собственный отзыв."""
+    res = await B.supabase.table("reviews").select(
+        "user_id, rating, text, rated_at").execute()
+    rows = res.data or []
+
+    rated = [r for r in rows if r.get("rating")]
+    distribution = {n: 0 for n in range(1, 6)}
+    for r in rated:
+        n = int(r["rating"])
+        if 1 <= n <= 5:
+            distribution[n] += 1
+    count = len(rated)
+    average = round(sum(int(r["rating"]) for r in rated) / count, 1) if count else 0.0
+
+    with_text = [r for r in rated if (r.get("text") or "").strip()]
+    with_text.sort(key=lambda r: (r.get("rated_at") or ""), reverse=True)
+    with_text = with_text[:REVIEWS_PAGE]
+
+    # имена берём одним запросом только по тем, чей отзыв реально показываем
+    names: Dict[int, dict] = {}
+    if with_text:
+        ids = [r["user_id"] for r in with_text]
+        try:
+            u = await B.supabase.table("users").select(
+                "user_id, full_name, username").in_("user_id", ids).execute()
+            names = {row["user_id"]: row for row in (u.data or [])}
+        except Exception as e:
+            logger.warning(f"reviews: не удалось получить имена авторов: {e}")
+
+    mine = next((r for r in rows if r.get("user_id") == user_id), None)
+
+    return {
+        "average": average,
+        "count": count,
+        "distribution": distribution,
+        "mine": {
+            "rating": mine.get("rating") if mine else None,
+            "text": (mine.get("text") or "") if mine else "",
+            "rated_at": mine.get("rated_at") if mine else None,
+        },
+        "items": [{
+            "id": str(r["user_id"]),
+            "name": _review_author(names.get(r["user_id"])),
+            "rating": int(r["rating"]),
+            "text": (r.get("text") or "").strip()[:REVIEW_TEXT_LIMIT],
+            "date": (r.get("rated_at") or "")[:10],
+            "mine": r["user_id"] == user_id,
+        } for r in with_text],
+        "limit": REVIEW_TEXT_LIMIT,
+    }
+
+
+async def api_reviews_get(request: web.Request) -> web.Response:
+    """Лента отзывов и средний балл. Видна всем пользователям приложения."""
+    try:
+        return ok(await _reviews_payload(request["user_id"]))
+    except Exception as e:
+        logger.warning(f"reviews: чтение недоступно: {e}")
+        # Экран не должен падать из-за отзывов — отдаём пустую витрину.
+        return ok({"average": 0.0, "count": 0, "distribution": {},
+                   "mine": {"rating": None, "text": "", "rated_at": None},
+                   "items": [], "limit": REVIEW_TEXT_LIMIT, "unavailable": True})
+
+
+async def api_reviews_post(request: web.Request) -> web.Response:
+    """Оставить или изменить свой отзыв. Один отзыв на пользователя."""
+    user_id = request["user_id"]
+    body = await request.json()
+
+    try:
+        rating = int(body.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0
+    if rating < 1 or rating > 5:
+        return err("Оценка должна быть от 1 до 5")
+
+    text = (body.get("text") or "").strip()[:REVIEW_TEXT_LIMIT]
+
+    row = {
+        "user_id": user_id,
+        "rating": rating,
+        "text": text or None,
+        "rated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await B.supabase.table("reviews").upsert(row, on_conflict="user_id").execute()
+    except Exception as e:
+        logger.error(f"reviews: не удалось сохранить отзыв {user_id}: {e}")
+        return err("Не удалось сохранить отзыв, попробуйте позже", 503)
+
+    # Низкую оценку показываем администратору сразу — это сигнал разобраться
+    if rating <= 2:
+        preview = text or "без комментария"
+        await notify_admins(
+            f"⚠️ <b>Низкая оценка сервиса</b>\n\n"
+            f"Пользователь: <code>{user_id}</code>\n"
+            f"Оценка: {'⭐' * rating}\n"
+            f"Комментарий: {html_escape(preview)}"
+        )
+
+    return ok(await _reviews_payload(user_id))
+
+
+async def api_admin_review_hide(request: web.Request) -> web.Response:
+    """Модерация: убрать текст отзыва, не трогая саму оценку.
+
+    Отдельного флага в таблице нет, и он не нужен: без текста отзыв
+    исчезает из ленты, но остаётся в среднем балле — накрутки не возникает."""
+    target = request.match_info.get("user_id")
+    try:
+        await B.supabase.table("reviews").update({"text": None}).eq("user_id", int(target)).execute()
+    except Exception as e:
+        return err(f"Не удалось скрыть отзыв: {e}", 503)
+    return ok({"hidden": True})
 
 
 # ====================== QR-КОД ПОДПИСКИ ======================
@@ -2123,6 +2370,259 @@ async def api_admin_reprovision(request: web.Request) -> web.Response:
     return ok({"started": True, "active": active_cnt})
 
 
+# ====================== ПРОВИЖИНИНГ НОД («одна кнопка») ======================
+def _ssh_cmd(host_ip: str, remote: str) -> List[str]:
+    return ["ssh", "-i", PROV_KEY, "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null", "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=20", f"root@{host_ip}", remote]
+
+
+async def api_admin_node_preflight(request: web.Request) -> web.Response:
+    """Быстрая проверка перед запуском: доступность SSH-порта новой ноды и,
+    для входа, соответствие DNS → IP. Root не нужен, ничего не меняется."""
+    body = await request.json() if request.can_read_body else {}
+    mode = body.get("mode"); ip = (body.get("ip") or "").strip()
+    domain = (body.get("domain") or "").strip()
+    if mode not in ("entry", "exit") or not ip:
+        return err("Нужны mode (entry|exit) и ip")
+    result: Dict[str, Any] = {"ssh_reachable": False, "dns_ok": None, "dns_resolved": None}
+    # TCP :22
+    try:
+        fut = asyncio.open_connection(ip, 22)
+        reader, writer = await asyncio.wait_for(fut, timeout=6)
+        writer.close()
+        result["ssh_reachable"] = True
+    except Exception:
+        result["ssh_reachable"] = False
+    # DNS для входа
+    if mode == "entry" and domain:
+        try:
+            infos = await asyncio.get_event_loop().getaddrinfo(domain, None)
+            addrs = {i[4][0] for i in infos}
+            result["dns_resolved"] = ", ".join(sorted(addrs))
+            result["dns_ok"] = ip in addrs
+        except Exception:
+            result["dns_ok"] = False
+    tools = _prov_available()
+    result["ready"] = tools is None
+    if tools:
+        result["tools_error"] = tools
+    return ok(result)
+
+
+async def api_admin_node_provision(request: web.Request) -> web.Response:
+    """Запускает провижининг новой ноды в фоне. Возвращает job_id — дашборд
+    опрашивает статус и показывает живой лог. Полная автоматизация:
+      • exit  — поднимаем выход и подвязываем к Москве (новая страна в боте);
+      • entry — поднимаем клон-вход; при make_active переводим на него страны.
+    """
+    unavailable = _prov_available()
+    if unavailable:
+        return err(f"Провижининг недоступен: {unavailable}", 503)
+    body = await request.json()
+    mode = body.get("mode")
+    ip = (body.get("ip") or "").strip()
+    password = (body.get("password") or "")
+    domain = (body.get("domain") or "").strip()
+    name = (body.get("name") or "").strip()
+    flag = (body.get("flag") or "").strip()
+    make_active = bool(body.get("make_active"))
+    if mode not in ("entry", "exit"):
+        return err("mode должен быть entry или exit")
+    if not ip or not password:
+        return err("Нужны IP и root-пароль новой ноды")
+    if mode == "entry" and not domain:
+        return err("Для входной ноды нужен домен (A-запись на её IP)")
+    if not name:
+        return err("Укажите название (например, 🇳🇱 Нидерланды)")
+
+    job_id = uuid_lib.uuid4().hex[:12]
+    _NODE_JOBS[job_id] = {"status": "running", "log": [], "result": None,
+                          "error": None, "mode": mode, "name": name,
+                          "created": int(time.time())}
+    # чистим старые задания (> 2 ч), чтобы не копить память
+    cutoff = int(time.time()) - 7200
+    for jid in [k for k, v in _NODE_JOBS.items() if v.get("created", 0) < cutoff]:
+        _NODE_JOBS.pop(jid, None)
+
+    admin_id = request["user_id"]
+    asyncio.create_task(_run_node_job(job_id, mode, ip, password, domain,
+                                      name, flag, make_active, admin_id))
+    return ok({"job_id": job_id})
+
+
+async def api_admin_node_status(request: web.Request) -> web.Response:
+    job = _NODE_JOBS.get(request.match_info["job_id"])
+    if not job:
+        return err("Задание не найдено", 404)
+    return ok({"status": job["status"], "log": job["log"],
+               "result": job["result"], "error": job["error"], "name": job["name"]})
+
+
+def _jlog(job_id: str, line: str):
+    job = _NODE_JOBS.get(job_id)
+    if job is not None:
+        job["log"].append(line)
+        if len(job["log"]) > 400:
+            job["log"] = job["log"][-400:]
+
+
+async def _run_node_job(job_id, mode, ip, password, domain, name, flag, make_active, admin_id):
+    """Фоновое задание: запускает provision-node.sh, стримит лог, при успехе
+    регистрирует ноду. Итог дублируется админу в чат с ботом."""
+    result_json: Optional[dict] = None
+    try:
+        source_ip = PROV_ENTRY_SRC if mode == "entry" else PROV_EXIT_SRC
+        cmd = ["bash", PROV_SCRIPT, mode, "--ip", ip, "--pass", password,
+               "--source-ip", source_ip, "--prov-key", PROV_KEY]
+        if mode == "entry":
+            cmd += ["--domain", domain]
+        _jlog(job_id, f"▸ Старт провижининга {mode} · {ip}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        assert proc.stdout
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip()
+            if not line:
+                continue
+            if line.startswith("RESULT_JSON="):
+                try:
+                    result_json = json.loads(line[len("RESULT_JSON="):])
+                except Exception as e:
+                    _jlog(job_id, f"! не смог разобрать RESULT_JSON: {e}")
+            else:
+                _jlog(job_id, line)
+        await proc.wait()
+        if proc.returncode != 0 or not result_json:
+            raise RuntimeError("провижининг завершился с ошибкой (см. лог выше)")
+
+        # --- регистрация ---
+        if mode == "exit":
+            _jlog(job_id, "▸ Подвязываю выход к Москве и регистрирую страну…")
+            server_row = await _wire_and_register_exit(job_id, name, flag, result_json)
+            summary = (f"✅ <b>Нода-выход поднята</b>\n\n{name}\n"
+                       f"IP выхода: <code>{ip}</code>\n"
+                       f"Инбаунд на Москве: {server_row.get('inbound_id')} · порт {server_row.get('client_port')}\n"
+                       f"Добавлена в бота как страна ✅")
+        else:
+            _jlog(job_id, "▸ Входная нода готова")
+            server_row = await _register_or_switch_entry(job_id, domain, result_json, make_active)
+            switched = "переведены на новый вход ✅" if make_active else "не переключал (нажмите «Сделать активным», когда будете готовы)"
+            summary = (f"✅ <b>Входная нода поднята</b>\n\n{name}\n"
+                       f"Домен: <code>{domain}</code>\nIP: <code>{ip}</code>\n"
+                       f"Панель: {result_json.get('panel',{}).get('web_port','')}\n"
+                       f"Страны {switched}")
+
+        _NODE_JOBS[job_id]["result"] = server_row
+        _NODE_JOBS[job_id]["status"] = "done"
+        _jlog(job_id, "✓ Готово")
+    except Exception as e:
+        logger.exception(f"node provision {job_id}: {e}")
+        _jlog(job_id, f"✗ Ошибка: {e}")
+        _NODE_JOBS[job_id]["status"] = "error"
+        _NODE_JOBS[job_id]["error"] = str(e)
+        summary = f"❌ <b>Провижининг ноды не удался</b>\n\n{name}\n{e}"
+    try:
+        await B.bot.send_message(admin_id, summary, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception:
+        pass
+
+
+async def _entry_template_server() -> Optional[dict]:
+    """Существующая запись сервера, указывающая на панель Москвы — берём как
+    шаблон (panel_url/логин/пароль/sub_*), чтобы новая страна унаследовала их."""
+    servers = await B.load_servers_from_supabase()
+    entry_panel = None
+    for s in servers:
+        pu = (s.get("panel_url") or "")
+        if PROV_ENTRY_IP in pu or "vpn.gigabytebot.com" in pu:
+            entry_panel = s
+            break
+    return entry_panel or (servers[0] if servers else None)
+
+
+async def _wire_and_register_exit(job_id, name, flag, result_json) -> dict:
+    import shlex
+    chain = result_json.get("chain") or {}
+    slug = "".join(ch for ch in name.lower() if ch.isalnum()) or "exit"
+    # запускаем wire-exit.py на Москве (скрипт передаём по stdin)
+    args = ["python3", "-", "--dsn", PROV_ENTRY_DSN, "--slug", slug,
+            "--remark", name, "--exit-ip", chain.get("address", ""),
+            "--exit-port", str(chain.get("port", 443)), "--exit-uuid", chain.get("uuid", ""),
+            "--exit-pbk", chain.get("publicKey", ""), "--exit-sid", chain.get("shortId", ""),
+            "--exit-sni", chain.get("sni", "www.amazon.com")]
+    remote = " ".join(shlex.quote(a) for a in args)
+    with open(PROV_WIRE, "rb") as f:
+        script = f.read()
+    proc = await asyncio.create_subprocess_exec(
+        *_ssh_cmd(PROV_ENTRY_IP, remote),
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT)
+    out, _ = await proc.communicate(input=script)
+    wire = None
+    for line in out.decode(errors="replace").splitlines():
+        _jlog(job_id, "  " + line)
+        if line.startswith("WIRE_RESULT="):
+            wire = json.loads(line[len("WIRE_RESULT="):])
+    if proc.returncode != 0 or not wire:
+        raise RuntimeError("не удалось подвязать выход к Москве (см. лог)")
+
+    tmpl = await _entry_template_server() or {}
+    columns = await _existing_server_columns()
+    row = _filter_server_payload({
+        "name": name,
+        "ip": tmpl.get("ip") or "vpn.gigabytebot.com",
+        "panel_url": tmpl.get("panel_url"),
+        "panel_login": tmpl.get("panel_login"),
+        "panel_pass": tmpl.get("panel_pass"),
+        "inbound_id": wire["inbound_id"],
+        "client_port": wire["client_port"],
+        "sub_port": tmpl.get("sub_port"),
+        "sub_path": tmpl.get("sub_path"),
+        "pbk": wire["pbk"],
+        "sni": wire["sni"],
+        "short_id": wire["short_id"],
+        "fp": wire.get("fp") or "firefox",
+        "is_active": True,
+    }, columns, for_update=False)
+    res = await B.supabase.table("servers").insert(row).execute()
+    return res.data[0] if res.data else row
+
+
+async def _register_or_switch_entry(job_id, domain, result_json, make_active) -> dict:
+    panel = result_json.get("panel") or {}
+    info = {"domain": domain,
+            "panel_url": f"https://{domain}:{panel.get('web_port','')}{panel.get('base_path','')}",
+            "switched": False}
+    if make_active:
+        # Клон-вход имеет те же inbound_id и Reality-ключи, что и Москва, поэтому
+        # достаточно перенаправить существующие страны на новый домен/панель.
+        servers = await B.load_servers_from_supabase()
+        new_panel = f"https://{domain}:{panel.get('web_port','')}{panel.get('base_path','')}"
+        switched = 0
+        for s in servers:
+            pu = s.get("panel_url") or ""
+            if PROV_ENTRY_IP in pu or "vpn.gigabytebot.com" in pu:
+                await B.supabase.table("servers").update(
+                    {"ip": domain, "panel_url": new_panel}).eq("id", s["id"]).execute()
+                switched += 1
+        info["switched"] = True
+        info["switched_count"] = switched
+        _jlog(job_id, f"  переведено стран на новый вход: {switched}")
+    return info
+
+
+async def api_admin_dashboard_link(request: web.Request) -> web.Response:
+    """Персональная ссылка входа в веб-дашборд для текущего администратора.
+    Мини-апп открывает её кнопкой — админ переходит в полноценный веб-дашборд
+    (на компьютере/в браузере). Ссылка подписана токеном бота, живёт ограниченно."""
+    admin_id = request["user_id"]
+    if not B.DASHBOARD_URL:
+        return err("Дашборд не настроен: не задан DASHBOARD_URL в .env", 503)
+    token = B.dashboard_token(admin_id)
+    return ok({"url": f"{B.DASHBOARD_URL}/?token={token}", "ttl_hours": B.DASHBOARD_TOKEN_TTL_HOURS})
+
+
 async def api_admin_delete_user(request: web.Request) -> web.Response:
     uid_str = request.match_info["user_id"]
     if not uid_str.isdigit():
@@ -2191,7 +2691,10 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_get("/api/referral", api_referral)
     r.add_post("/api/referral/redeem", api_referral_redeem)
     r.add_post("/api/settings/reminders", api_settings_reminders)
+    r.add_get("/api/reviews", api_reviews_get)
+    r.add_post("/api/reviews", api_reviews_post)
     # Админские
+    r.add_post("/api/admin/reviews/{user_id}/hide", api_admin_review_hide)
     r.add_get("/api/admin/stats", api_admin_stats)
     r.add_get("/api/admin/rates", api_admin_rates)
     r.add_get("/api/admin/stars-balance", api_admin_stars_balance)
@@ -2219,6 +2722,10 @@ def setup_webapp_api(app: web.Application, bot_module: Any) -> None:
     r.add_delete("/api/admin/users/{user_id}", api_admin_delete_user)
     r.add_post("/api/admin/subscriptions/{sub_id}/revoke", api_admin_revoke_sub)
     r.add_post("/api/admin/reprovision", api_admin_reprovision)
+    r.add_get("/api/admin/dashboard-link", api_admin_dashboard_link)
+    r.add_post("/api/admin/nodes/preflight", api_admin_node_preflight)
+    r.add_post("/api/admin/nodes/provision", api_admin_node_provision)
+    r.add_get("/api/admin/nodes/provision/{job_id}", api_admin_node_status)
 
     # Статика собранного веб-аппа (webapp/dist) по адресу /app
     import os

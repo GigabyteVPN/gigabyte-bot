@@ -1,5 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigationType,
+} from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
 import { FileText, Lock, WifiOff, User, ShoppingBag, BookOpen, LifeBuoy, ChevronRight } from 'lucide-react';
 import { BottomNav, NavTab } from './components/layout/BottomNav';
@@ -21,11 +28,44 @@ import Support from './pages/Support';
 const AdminApp = lazy(() => import('./pages/Admin'));
 
 function Spinner() {
+  // fixed inset-0 (а не min-h-screen): спиннер всегда центрируется по вьюпорту.
+  // Иначе при первом рендере он центрируется в полном экране, а Suspense-фолбэк
+  // админ-чанка — уже внутри обёртки с paddingTop/paddingBottom, из-за чего
+  // спиннер «прыгал» вниз. fixed выносит его из потока и убирает скачок.
   return (
-    <div className="flex items-center justify-center min-h-screen">
+    <div className="fixed inset-0 flex items-center justify-center">
       <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
     </div>
   );
+}
+
+/**
+ * У каждого раздела свой скролл.
+ *
+ * Все страницы живут в одном скролле документа, поэтому позиция «перетекала»:
+ * пролистал «Профиль» вниз → открыл «Тарифы», а они уже прокручены. Переход
+ * вперёд открывает раздел сверху, «назад» возвращает туда, где были.
+ */
+function ScrollManager() {
+  const { key } = useLocation();
+  const navType = useNavigationType();
+  const positions = useRef(new Map<string, number>());
+  const currentKey = useRef(key);
+
+  useEffect(() => {
+    const leavingKey = currentKey.current;
+    return () => {
+      positions.current.set(leavingKey, window.scrollY);
+    };
+  }, [key]);
+
+  useLayoutEffect(() => {
+    currentKey.current = key;
+    // до отрисовки кадра — чтобы не было видимого рывка
+    window.scrollTo(0, navType === 'POP' ? positions.current.get(key) ?? 0 : 0);
+  }, [key, navType]);
+
+  return null;
 }
 
 function ErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -93,18 +133,29 @@ function TermsGate({ onAccepted }: { onAccepted: () => void }) {
         paddingTop: 'max(calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 12px), 24px)',
       }}
     >
-      <div className="flex-1 flex flex-col items-center justify-center gap-5 min-h-0">
-        <img
-          src={logoUrl}
-          alt="Gigabyte"
-          className="w-[190px] h-[190px] object-contain drop-shadow-[0_10px_50px_rgba(10,132,255,0.5)]"
-        />
-        <div className="text-center">
-          <h1 className="text-[30px] font-bold tracking-tight text-white leading-tight">
-            {t('terms.welcome')}
-          </h1>
-          <div className="text-[15px] text-[#8E8E93] leading-relaxed max-w-[320px] mx-auto mt-2.5">
-            {t('terms.tagline')}
+      {/* Мягкое синее свечение для глубины на чёрном фоне — вместо логотипа */}
+      <div className="absolute top-[38%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[440px] h-[440px] rounded-full bg-[#0A84FF]/10 blur-[110px] pointer-events-none" />
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 min-h-0 text-center relative">
+        {/* Типографический вордмарк вместо изображения логотипа */}
+        <div className="text-[13px] font-semibold uppercase tracking-[0.4em] text-white/35 pl-[0.4em]">
+          Gigabyte VPN
+        </div>
+        {/* Крупная надпись «Добро пожаловать» с фирменным градиентом */}
+        <h1
+          className="text-[44px] font-bold tracking-tight leading-[1.04] bg-clip-text text-transparent px-2"
+          style={{
+            backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #CFE2FF 55%, #4DA6FF 100%)',
+            filter: 'drop-shadow(0 6px 30px rgba(10,132,255,0.35))',
+          }}
+        >
+          {t('terms.welcome')}
+        </h1>
+        {/* Тематическая цитата */}
+        <div className="flex flex-col items-center gap-4 mt-1">
+          <div className="h-px w-16 bg-gradient-to-r from-transparent via-[#0A84FF]/60 to-transparent" />
+          <div className="text-[17px] leading-relaxed text-white/65 italic max-w-[330px]">
+            «{t('terms.quote')}»
           </div>
         </div>
       </div>
@@ -211,6 +262,7 @@ export default function App() {
   return (
     <AppContext.Provider value={{ boot, refreshBoot: () => load(true) }}>
       <HashRouter>
+        <ScrollManager />
         <div
           className="min-h-screen text-white"
           style={{

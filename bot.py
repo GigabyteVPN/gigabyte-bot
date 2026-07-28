@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Dict, Tuple, List, Optional, Any
 from collections import defaultdict
@@ -78,6 +78,8 @@ XUI_VERIFY_SSL: bool = (os.getenv("XUI_VERIFY_SSL", "true").strip().lower() == "
 # HMAC на BOT_TOKEN, срок жизни ограничен.
 DASHBOARD_URL: str = (os.getenv("DASHBOARD_URL") or "").rstrip("/")
 DASHBOARD_TOKEN_TTL_HOURS: int = int(os.getenv("DASHBOARD_TOKEN_TTL_HOURS") or 168)  # 7 дней
+# Официальный сайт (лендинг с тарифами, инструкциями и ссылкой временного доступа).
+WEBSITE_URL: str = (os.getenv("WEBSITE_URL") or "https://gigabytebot.com").rstrip("/")
 
 def dashboard_token(admin_id: int, ttl_hours: Optional[int] = None) -> str:
     """Подписанный токен входа в дашборд: '<id>.<expiry>.<подпись>'."""
@@ -108,10 +110,10 @@ def verify_dashboard_token(token: str) -> Optional[int]:
 # (+REF_POINTS_PURCHASE за его первую покупку). Просто за запуск бота по
 # ссылке баллы НЕ даём (REF_POINTS_SIGNUP = 0) — только связываем реферала.
 # REF_REDEEM_COST баллов = REF_REDEEM_MONTHS месяц(ев) VPN, то есть
-# 5 оплативших друзей (5 × 20 = 100) = 1 месяц бесплатно.
+# 3 оплативших друга (3 × 20 = 60) = 1 месяц бесплатно.
 REF_POINTS_SIGNUP: int = 0
 REF_POINTS_PURCHASE: int = 20
-REF_REDEEM_COST: int = 100
+REF_REDEEM_COST: int = 60
 REF_REDEEM_MONTHS: int = 1
 
 COUNTRIES = [
@@ -119,7 +121,7 @@ COUNTRIES = [
     "🇰🇷 Южная Корея", "🇨🇦 Канада", "🇯🇵 Япония",
     "🇦🇺 Австралия", "🇳🇱 Нидерланды", "🇸🇬 Сингапур",
     "🇨🇭 Швейцария", "🇸🇪 Швеция", "🇳🇴 Норвегия",
-    "🇩🇰 Дания", "🇫🇮 Финляндия", "🇧🇪 Бельгия",
+    "🇩🇰 Дания", "🇧🇪 Бельгия",
     "🇦🇹 Австрия", "🇮🇪 Ирландия", "🇮🇱 Израиль",
 ]
 
@@ -1284,10 +1286,11 @@ class XUIApi:
             logger.error(f"❌ Ошибка get_online_emails ({self.server.get('name')}): {e}")
         return []
 
-    async def get_clients(self) -> List[dict]:
+    async def get_clients(self, inbound_id: Optional[int] = None) -> List[dict]:
         if not self.cookies and not await self.login():
             return []
-        url = f"{self.base_url}/panel/api/inbounds/get/{self.server['inbound_id']}"
+        ib = inbound_id if inbound_id is not None else self.server['inbound_id']
+        url = f"{self.base_url}/panel/api/inbounds/get/{ib}"
         try:
             r = await self.client.get(url, cookies=self.cookies)
             if r.status_code == 200:
@@ -1295,14 +1298,29 @@ class XUIApi:
                 if data.get("success"):
                     inbound = data.get("obj", {})
                     settings = inbound.get("settings")
+                    clients: List[dict] = []
                     if isinstance(settings, str):
                         try:
-                            settings = json.loads(settings)
+                            clients = (json.loads(settings) or {}).get("clients") or []
                         except Exception:
-                            return []
-                    elif not isinstance(settings, dict):
-                        return []
-                    clients = settings.get("clients", [])
+                            clients = []
+                    elif isinstance(settings, dict):
+                        clients = settings.get("clients") or []
+                    # ИСПРАВЛЕНИЕ: форк 3x-ui на PostgreSQL НЕ встраивает клиентов в
+                    # settings (они в нормализованных таблицах). Панель отдаёт их в
+                    # obj.clientStats — берём оттуда (uuid → id, есть subId/email/срок).
+                    if not clients:
+                        for cs in inbound.get("clientStats") or []:
+                            if not cs.get("uuid"):
+                                continue
+                            clients.append({
+                                "id": cs.get("uuid"),
+                                "email": cs.get("email"),
+                                "subId": cs.get("subId"),
+                                "expiryTime": cs.get("expiryTime") or 0,
+                                "enable": cs.get("enable", True),
+                                "totalGB": cs.get("total") or 0,
+                            })
                     logger.info(f"📋 Получено {len(clients)} клиентов из панели {self.server['name']}")
                     return clients
             else:
@@ -1374,6 +1392,12 @@ async def sync_all_servers_with_supabase() -> dict:
         logger.warning("⚠️ Нет активных серверов.")
         return stats
 
+    # Панель по server_id: клиент может быть в НЕСКОЛЬКИХ инбаундах одной панели
+    # (мультистрана в одной ссылке, напр. Франция+Финляндия на входе Москвы).
+    # В этом случае НЕ «переносим» server_id между странами одной панели — иначе
+    # основная страна подписки скакала бы туда-сюда при каждой синхронизации.
+    panel_by_id = {s["id"]: (s.get("panel_url") or "").rstrip("/") for s in servers}
+
     now_ts_ms = int(datetime.now().timestamp() * 1000)
     now_sync = int(datetime.now().timestamp())
 
@@ -1428,8 +1452,13 @@ async def sync_all_servers_with_supabase() -> dict:
                     subs_by_uuid[uuid_] = new_row  # чтобы не восстанавливать позже
                     report["imported"] += 1
                 elif _sub_needs_update(existing, p, server_id):
+                    # Если клиент уже числится за другой страной ТОЙ ЖЕ панели —
+                    # это мультистрана, а не перенос: сохраняем исходный server_id.
+                    keep_sid = existing.get("server_id")
+                    same_panel = (keep_sid and keep_sid != server_id
+                                  and panel_by_id.get(keep_sid) == panel_by_id.get(server_id))
                     update_fields = {
-                        "server_id": server_id,
+                        "server_id": keep_sid if same_panel else server_id,
                         "email": p.get("email"),
                         "expiry_date": p.get("expiryTime") or 0,
                         "status": "active",
@@ -1536,6 +1565,8 @@ async def force_import_clients_from_panel(message: Message = None) -> dict:
     # Один запрос вместо запроса на каждого клиента
     all_subs = await fetch_all_supabase_rows("subscriptions", "client_uuid, server_id, id")
     subs_by_uuid: Dict[str, dict] = {s["client_uuid"]: s for s in all_subs if s.get("client_uuid")}
+    # Мультистрана в одной панели — не считаем «переносом» (см. sync выше).
+    panel_by_id = {s["id"]: (s.get("panel_url") or "").rstrip("/") for s in servers}
 
     for server in servers:
         server_id = server["id"]
@@ -1592,9 +1623,13 @@ async def force_import_clients_from_panel(message: Message = None) -> dict:
                 subs_by_uuid[uuid_] = row
                 report["imported"] += 1
             elif existing.get("server_id") != server_id:
-                moved_uuids.append(uuid_)
-                existing["server_id"] = server_id
-                report["moved"] += 1
+                # Та же панель, другая страна → мультистрана, не перенос.
+                if panel_by_id.get(existing.get("server_id")) == panel_by_id.get(server_id):
+                    stats["skipped"] += 1
+                else:
+                    moved_uuids.append(uuid_)
+                    existing["server_id"] = server_id
+                    report["moved"] += 1
             else:
                 stats["skipped"] += 1
 
@@ -1823,6 +1858,32 @@ async def subscription_reminders_task(bot_instance: Bot):
         await asyncio.sleep(600)
 
 # ====================== БЭКАП В SUPABASE STORAGE ======================
+# Резервный список на случай, если описание схемы недоступно.
+_BACKUP_TABLES_FALLBACK = [
+    "users", "servers", "subscriptions", "payments", "tickets",
+    "ticket_messages", "country_requests", "tariffs",
+    "pending_confirmations", "promo_keys", "point_transactions",
+    "trial_claims", "reviews",
+]
+
+
+async def list_supabase_tables() -> List[str]:
+    """Имена всех таблиц проекта — из описания схемы, которое отдаёт REST."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{SUPABASE_URL}/rest/v1/",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            )
+            data = resp.json()
+        names = sorted((data.get("definitions") or {}).keys())
+        if names:
+            return names
+    except Exception as e:
+        logger.warning(f"Не удалось получить список таблиц ({e}), берём запасной")
+    return _BACKUP_TABLES_FALLBACK
+
+
 async def backup_database_to_supabase():
     await init_supabase()
     bucket_name = "database-backups"
@@ -1830,17 +1891,22 @@ async def backup_database_to_supabase():
         await supabase.storage.get_bucket(bucket_name)
     except Exception:
         logger.info(f"📦 Создаём bucket '{bucket_name}'...")
-        await supabase.storage.create_bucket(bucket_name, public=False)
+        # Настройки хранилища передаются словарём options — отдельного
+        # аргумента public в клиенте нет (был в старых версиях supabase-py,
+        # из-за чего задача бэкапа падала каждую ночь).
+        await supabase.storage.create_bucket(bucket_name, options={"public": False})
 
-    all_tables = [
-        "users", "servers", "subscriptions", "payments",
-        "tickets", "ticket_messages", "country_requests",
-        "tariffs", "pending_confirmations", "promo_keys"
-    ]
+    # Список таблиц берём у самой базы, а не держим в коде: раньше он был
+    # записан вручную и новые таблицы (отзывы, баллы, пробные доступы)
+    # молча не попадали в бэкап.
+    all_tables = await list_supabase_tables()
     backup_data = {}
     for table in all_tables:
-        res = await supabase.table(table).select("*").execute()
-        backup_data[table] = res.data
+        try:
+            res = await supabase.table(table).select("*").execute()
+            backup_data[table] = res.data
+        except Exception as e:
+            logger.warning(f"Бэкап: таблица {table} пропущена ({e})")
 
     with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False, encoding='utf-8') as tmp:
         json.dump(backup_data, tmp, indent=2, ensure_ascii=False)
@@ -2413,14 +2479,33 @@ async def send_terms_card(message: Message):
 
 # ====================== /start ======================
 def webapp_inline_keyboard() -> Optional[InlineKeyboardMarkup]:
-    """Инлайн-кнопка запуска мини-аппа прямо под сообщением бота."""
+    """Инлайн-кнопка запуска мини-аппа прямо под сообщением бота (+ ссылка на сайт)."""
     webapp_url = os.getenv("WEBAPP_URL")
     if not webapp_url:
         return None
     from aiogram.types import WebAppInfo
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Открыть приложение", web_app=WebAppInfo(url=webapp_url))]
+    rows = [[InlineKeyboardButton(text="⚡ Открыть приложение", web_app=WebAppInfo(url=webapp_url))]]
+    if WEBSITE_URL:
+        rows.append([InlineKeyboardButton(text="🌐 Наш сайт", url=WEBSITE_URL)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(Command("site", "website"))
+async def cmd_site(message: Message):
+    """Ссылка на официальный сайт + подсказка про временный доступ."""
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌐 Открыть сайт", url=WEBSITE_URL)]
     ])
+    await message.answer(
+        "🌐 <b>Официальный сайт Gigabyte VPN</b>\n\n"
+        f"{WEBSITE_URL}\n\n"
+        "Тарифы, инструкции по установке, статус серверов и новости.\n\n"
+        "💡 <b>Заблокировали Telegram?</b> На сайте есть <b>бесплатная ссылка временного "
+        "доступа</b> — подключитесь к VPN, зайдите в Telegram и оформите подписку.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb,
+        disable_web_page_preview=True,
+    )
 
 @router.message(Command("dashboard", "panel", "admin"))
 async def cmd_dashboard(message: Message):
@@ -2485,7 +2570,8 @@ async def cmd_start(message: Message):
             "⚡ Высокая скорость соединения\n"
             "🔐 Защищённое шифрованное подключение\n"
             "📶 Безопасность в публичных сетях Wi-Fi\n\n"
-            "Всё управление — в приложении: покупка, продление, подключение и поддержка.",
+            "Всё управление — в приложении: покупка, продление, подключение и поддержка.\n\n"
+            "🌐 Наш сайт: gigabytebot.com — тарифы, инструкции и доступ, если Telegram заблокирован.",
             parse_mode=ParseMode.HTML,
             reply_markup=app_kb
         )
@@ -4959,6 +5045,294 @@ async def set_commands(bot_instance: Bot):
         BotCommand(command="start", description="Открыть приложение"),
     ])
 
+# ====================== ОТЗЫВЫ И ОЦЕНКИ ======================
+# Собираем настоящие оценки у людей, которые уже пользуются сервисом: через
+# REVIEW_ASK_AFTER_DAYS дней активной подписки бот один раз просит поставить
+# оценку. Средний балл потом публикуется на сайте — поэтому в него попадают
+# ВСЕ оценки, включая низкие: подтасовывать рейтинг нельзя ни технически,
+# ни по правилам поисковых систем.
+#
+# SQL для таблицы (выполнить один раз в Supabase SQL Editor):
+#   create table if not exists public.reviews (
+#     user_id   bigint primary key,
+#     rating    smallint check (rating between 1 and 5),
+#     text      text,
+#     asked_at  timestamptz not null default now(),
+#     rated_at  timestamptz
+#   );
+#   alter table public.reviews enable row level security;
+#
+# Пока таблицы нет — функция сама отключается и пишет об этом в лог один раз.
+
+REVIEW_ASK_AFTER_DAYS: int = int(os.getenv("REVIEW_ASK_AFTER_DAYS") or 7)
+REVIEW_ASK_PER_CYCLE: int = 20   # сколько приглашений максимум за один проход
+_reviews_table_missing: bool = False
+
+
+class ReviewStates(StatesGroup):
+    waiting_text = State()
+
+
+async def _reviews_rows(select: str = "*") -> Optional[List[dict]]:
+    """Читает таблицу отзывов. None — таблицы нет (функция отключена)."""
+    global _reviews_table_missing
+    if _reviews_table_missing:
+        return None
+    try:
+        res = await supabase.table("reviews").select(select).execute()
+        return res.data or []
+    except Exception as e:
+        _reviews_table_missing = True
+        logger.warning(
+            f"⚠️ Таблица reviews недоступна ({e}). Сбор отзывов отключён. "
+            f"Создайте её один раз в Supabase SQL Editor — SQL в комментарии "
+            f"над REVIEW_ASK_AFTER_DAYS в bot.py."
+        )
+        return None
+
+
+async def _reviews_write(row: dict) -> bool:
+    """Создаёт или обновляет запись отзыва (ключ — user_id)."""
+    global _reviews_table_missing
+    if _reviews_table_missing:
+        return False
+    try:
+        await supabase.table("reviews").upsert(row, on_conflict="user_id").execute()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Не удалось сохранить отзыв: {e}")
+        return False
+
+
+def rating_keyboard() -> InlineKeyboardMarkup:
+    """Пять кнопок-звёзд в один ряд — оценка ставится одним касанием."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⭐", callback_data="rate_1"),
+        InlineKeyboardButton(text="⭐⭐", callback_data="rate_2"),
+        InlineKeyboardButton(text="⭐⭐⭐", callback_data="rate_3"),
+        InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data="rate_4"),
+        InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data="rate_5"),
+    ]])
+
+
+async def review_stats() -> Optional[dict]:
+    """Средний балл и распределение оценок. None — сбор отключён."""
+    rows = await _reviews_rows("rating, text, rated_at")
+    if rows is None:
+        return None
+    rated = [r for r in rows if r.get("rating")]
+    if not rated:
+        return {"count": 0, "average": 0.0, "with_text": 0, "distribution": {}}
+    total = sum(int(r["rating"]) for r in rated)
+    dist: Dict[int, int] = {}
+    for r in rated:
+        dist[int(r["rating"])] = dist.get(int(r["rating"]), 0) + 1
+    return {
+        "count": len(rated),
+        "average": round(total / len(rated), 2),
+        "with_text": len([r for r in rated if (r.get("text") or "").strip()]),
+        "distribution": dist,
+    }
+
+
+async def ask_for_reviews(bot_instance: Bot):
+    """Приглашает оценить сервис тех, кто пользуется им дольше недели."""
+    await init_supabase()
+    existing = await _reviews_rows("user_id")
+    if existing is None:
+        return
+    already = {r["user_id"] for r in existing if r.get("user_id")}
+
+    subs = await fetch_all_supabase_rows("subscriptions", "user_id, status, created_at, expiry_date")
+    now = datetime.now(timezone.utc)
+    now_ms = int(time.time() * 1000)
+    threshold = now - timedelta(days=REVIEW_ASK_AFTER_DAYS)
+
+    # язык пользователя, чтобы просить на понятном ему языке
+    langs: Dict[int, str] = {}
+    try:
+        for r in await fetch_all_supabase_rows("users", "user_id, lang"):
+            if r.get("user_id"):
+                langs[r["user_id"]] = (r.get("lang") or "ru")
+    except Exception:
+        pass
+
+    candidates: List[int] = []
+    for s in subs:
+        uid = s.get("user_id")
+        if not uid or uid in already or uid in candidates:
+            continue
+        if s.get("status") != "active":
+            continue
+        expiry = s.get("expiry_date") or 0
+        if expiry and expiry < now_ms:
+            continue
+        created = s.get("created_at")
+        if not created:
+            continue
+        try:
+            created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone.utc)
+        if created_dt <= threshold:
+            candidates.append(uid)
+
+    sent = 0
+    for uid in candidates[:REVIEW_ASK_PER_CYCLE]:
+        lang = "en" if str(langs.get(uid, "ru")).lower().startswith(("en", "de", "fr")) else "ru"
+        text = (
+            "🙌 <b>How are we doing?</b>\n\n"
+            "You've been with Gigabyte VPN for a while — please rate the service. "
+            "One tap, and it really helps us get better."
+            if lang == "en" else
+            "🙌 <b>Как вам сервис?</b>\n\n"
+            "Вы пользуетесь Gigabyte VPN уже больше недели — оцените, пожалуйста, "
+            "работу сервиса. Одно касание, а нам это очень помогает."
+        )
+        try:
+            await bot_instance.send_message(uid, text, parse_mode=ParseMode.HTML,
+                                            reply_markup=rating_keyboard())
+            # отмечаем факт приглашения сразу — чтобы не спросить дважды
+            await _reviews_write({"user_id": uid})
+            sent += 1
+            await asyncio.sleep(0.4)
+        except Exception as e:
+            # заблокировал бота или удалил аккаунт — помечаем, чтобы не долбить
+            logger.info(f"отзыв: не доставлено {uid}: {e}")
+            await _reviews_write({"user_id": uid})
+    if sent:
+        logger.info(f"⭐ Приглашений оценить сервис отправлено: {sent}")
+
+
+async def review_requests_task(bot_instance: Bot):
+    """Раз в 6 часов зовём оценить сервис тех, кто ещё не оценивал."""
+    await asyncio.sleep(300)  # не мешаем старту бота
+    while True:
+        try:
+            await ask_for_reviews(bot_instance)
+        except Exception as e:
+            logger.error(f"❌ Задача сбора отзывов: {e}")
+        await asyncio.sleep(6 * 3600)
+
+
+@router.callback_query(F.data.startswith("rate_"))
+async def on_rate(callback: CallbackQuery, state: FSMContext):
+    """Пользователь поставил оценку."""
+    try:
+        rating = int(callback.data.split("_", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+    if rating < 1 or rating > 5:
+        await callback.answer()
+        return
+
+    uid = callback.from_user.id
+    lang = "ru"
+    try:
+        res = await supabase.table("users").select("lang").eq("user_id", uid).execute()
+        if res.data:
+            lang = (res.data[0].get("lang") or "ru")
+    except Exception:
+        pass
+    lang = "en" if str(lang).lower().startswith(("en", "de", "fr")) else "ru"
+
+    saved = await _reviews_write({
+        "user_id": uid,
+        "rating": rating,
+        "rated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    if not saved:
+        await callback.answer("Не удалось сохранить оценку" if lang == "ru" else "Could not save", show_alert=True)
+        return
+
+    stars = "⭐" * rating
+    if rating >= 4:
+        body = (
+            f"{stars}\n\nThank you! Would you add a couple of words? "
+            "Your review may appear on our site. Just send a message — or tap «Skip»."
+            if lang == "en" else
+            f"{stars}\n\nСпасибо! Добавите пару слов? Ваш отзыв может появиться "
+            "на нашем сайте. Просто напишите сообщение — или нажмите «Пропустить»."
+        )
+    else:
+        # Низкая оценка — зовём в поддержку, но сама оценка уже учтена в среднем
+        body = (
+            f"{stars}\n\nSorry we let you down. Tell us what went wrong — we'll fix it. "
+            "Write a message here, or tap «Skip»."
+            if lang == "en" else
+            f"{stars}\n\nЖаль, что не оправдали ожиданий. Напишите, что пошло не так — "
+            "постараемся исправить. Просто отправьте сообщение или нажмите «Пропустить»."
+        )
+
+    skip_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Пропустить" if lang == "ru" else "Skip", callback_data="rate_skip_text")
+    ]])
+    try:
+        await callback.message.edit_text(body, parse_mode=ParseMode.HTML, reply_markup=skip_kb)
+    except Exception:
+        await callback.message.answer(body, parse_mode=ParseMode.HTML, reply_markup=skip_kb)
+
+    await state.set_state(ReviewStates.waiting_text)
+    await callback.answer("Спасибо!" if lang == "ru" else "Thank you!")
+
+
+@router.callback_query(F.data == "rate_skip_text")
+async def on_rate_skip(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await callback.answer("Спасибо за оценку!")
+
+
+@router.message(ReviewStates.waiting_text)
+async def on_review_text(message: Message, state: FSMContext):
+    """Текст отзыва — необязательное дополнение к оценке."""
+    await state.clear()
+    text = (message.text or "").strip()[:500]
+    if text:
+        await _reviews_write({"user_id": message.from_user.id, "text": text})
+    await message.answer(
+        "Спасибо! Мы читаем каждый отзыв 💙",
+        reply_markup=main_keyboard(is_admin(message.from_user.id)),
+    )
+
+
+@router.message(Command("reviews"))
+async def cmd_reviews(message: Message):
+    """Сводка по оценкам — для администратора."""
+    if not is_admin(message.from_user.id):
+        return
+    stats = await review_stats()
+    if stats is None:
+        await message.answer(
+            "⚠️ Сбор отзывов выключен: нет таблицы <code>reviews</code>.\n\n"
+            "Создайте её один раз в Supabase SQL Editor — SQL лежит в bot.py "
+            "рядом с <code>REVIEW_ASK_AFTER_DAYS</code>.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if not stats["count"]:
+        await message.answer("Оценок пока нет — приглашения уходят раз в 6 часов.")
+        return
+    dist = "\n".join(
+        f"   {'⭐' * n} — {stats['distribution'].get(n, 0)}"
+        for n in range(5, 0, -1)
+    )
+    await message.answer(
+        f"⭐ <b>Оценки сервиса</b>\n\n"
+        f"Средний балл: <b>{stats['average']}</b> из 5\n"
+        f"Всего оценок: <b>{stats['count']}</b>\n"
+        f"С текстом: {stats['with_text']}\n\n{dist}\n\n"
+        f"<i>На сайт рейтинг попадает автоматически, когда оценок станет 5 и больше.</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 # ====================== FALLBACK ======================
 # ВАЖНО: этот хендлер ловит любое сообщение, не пойманное выше. Благодаря
 # menu_interrupt_middleware сюда уже не попадёт нажатие кнопки меню в режиме
@@ -5015,6 +5389,7 @@ async def main():
     asyncio.create_task(daily_backup_task(bot))
     asyncio.create_task(cleanup_rate_limits_periodically())
     asyncio.create_task(subscription_reminders_task(bot))
+    asyncio.create_task(review_requests_task(bot))
 
     # HTTP-сервер поднимаем ВСЕГДА: на нём живут API мини-аппа (/api/*),
     # статика веб-аппа (/app/) и — при заданном WEBHOOK_HOST — вебхук бота.

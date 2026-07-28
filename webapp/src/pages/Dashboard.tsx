@@ -42,6 +42,7 @@ import Legal from './Legal';
 import logoUrl from '../assets/logo.png';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
+import { useLockBodyScroll } from '../lib/scroll-lock';
 
 const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
   const [timeLeft, setTimeLeft] = useState<{ d: number; h: number; m: number; s: number } | null>(null);
@@ -100,7 +101,11 @@ const SubTraffic = ({ subId }: { subId: string }) => {
   return (
     <div className="flex flex-col items-end">
       <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
-        {data.online && <span className="w-1.5 h-1.5 rounded-full bg-[#32D74B] shadow-[0_0_6px_rgba(50,215,75,0.9)]" />}
+        {/* Точка живая: расходящаяся волна показывает, что соединение
+            активно прямо сейчас. Анимация та же, что у «Защита активна». */}
+        {data.online && (
+          <span className="w-1.5 h-1.5 rounded-full bg-[#32D74B] dot-pulse shrink-0" />
+        )}
         {data.online ? t('dash.online') : t('dash.traffic')}
       </span>
       <span className="text-[16px] font-semibold text-white font-mono">{formatBytes(total)}</span>
@@ -781,6 +786,10 @@ export default function Dashboard() {
   const [qrShareBusy, setQrShareBusy] = useState(false);
   const [histFilter, setHistFilter] = useState<HistFilter>('all');
 
+  // ВАЖНО: только после объявления всех состояний выше — иначе обращение к
+  // ещё не инициализированным const'ам роняет компонент (temporal dead zone).
+  useLockBodyScroll(!!(activeModal || qrSub || confirmDelete || selectedReceipt || legal));
+
   const fetchData = useCallback(async () => {
     try {
       const [subsData, paysData] = await Promise.all([api.subscriptions(), api.payments()]);
@@ -805,12 +814,7 @@ export default function Dashboard() {
     refreshBoot();
   });
 
-  useEffect(() => {
-    document.body.style.overflow = activeModal || qrSub || confirmDelete ? 'hidden' : '';
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [activeModal, qrSub, confirmDelete]);
+  // блокировка фона под модалками — см. useLockBodyScroll ниже
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -972,6 +976,9 @@ export default function Dashboard() {
           <div className="flex flex-col gap-4">
             {subs.map((sub) => {
               const isActive = sub.status === 'active';
+              // Ссылка может обслуживать несколько стран (напр. Франция+Финляндия) —
+              // показываем все флаги и названия, а не одно.
+              const countries = sub.countries && sub.countries.length ? sub.countries : [sub.server];
               return (
                 <div key={sub.id} className="ios-list overflow-hidden relative group">
                   <div className="p-5 relative overflow-hidden">
@@ -979,9 +986,31 @@ export default function Dashboard() {
                     <div className="relative z-10 flex flex-col gap-3">
                       <div className="flex justify-between items-start w-full">
                         <div className="flex flex-col gap-1">
-                          <div className="text-[22px] font-bold text-white tracking-tight flex items-center gap-2">
-                            {sub.server.flag} {sub.server.name}
-                          </div>
+                          {countries.length === 1 ? (
+                            <div className="text-[22px] font-bold text-white tracking-tight flex items-center gap-2">
+                              {countries[0].flag} {countries[0].name}
+                            </div>
+                          ) : (
+                            <>
+                              {/* Одна ссылка обслуживает несколько стран — показываем
+                                  их отдельными чипами, а не строкой через разделитель */}
+                              <div className="text-[22px] font-bold text-white tracking-tight flex items-center gap-2">
+                                <span className="text-[19px]">🌍</span>
+                                {t('dash.multiRegion')}
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                {countries.map((c, i) => (
+                                  <span
+                                    key={c.id ?? i}
+                                    className="inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-white/[0.07] border border-white/[0.07] text-[13px] font-semibold text-white/85"
+                                  >
+                                    <span className="text-[14px] leading-none">{c.flag}</span>
+                                    {c.name}
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          )}
                           <div className="flex items-center gap-2 mt-1">
                             <div
                               className={cn(
@@ -1609,7 +1638,7 @@ export default function Dashboard() {
                                   hapticFeedback.impactOccurred('light');
                                   setSelectedReceipt(p);
                                 }}
-                                className="w-full h-11 bg-white/[0.08] hover:bg-white/[0.12] active:bg-white/[0.15] active:scale-[0.98] transition-all rounded-xl flex items-center justify-center gap-2 text-white font-medium text-[15px]"
+                                className="w-full h-11 bg-white/[0.08] hover:bg-white/[0.12] active:bg-white/[0.15] active:scale-[0.98] transition-all rounded-full flex items-center justify-center gap-2 text-white font-medium text-[15px]"
                               >
                                 <FileText className="w-4 h-4" />
                                 {t('hist.receipt')}

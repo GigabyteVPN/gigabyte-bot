@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import { t } from '../lib/i18n';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ScrollLock } from '../lib/scroll-lock';
 import {
   ChevronLeft,
   Check,
@@ -583,6 +584,7 @@ export default function Buy() {
             className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md"
             onClick={() => !busy && setTrialOpen(false)}
           >
+            <ScrollLock />
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
