@@ -324,7 +324,10 @@
   }
   var copyBtn = document.getElementById("copy-trial");
   if (copyBtn) copyBtn.addEventListener("click", function () {
-    var link = document.getElementById("trial-link").textContent.trim();
+    // В плашке видно только домен — полная ссылка лежит в data-full,
+    // копируем именно её (то же поведение, что в приложении).
+    var el = document.getElementById("trial-link");
+    var link = (el.getAttribute("data-full") || el.textContent).trim();
     var done = function () { showToast(curLang === "en" ? "Key copied" : "Ключ скопирован"); };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, done);
     else {

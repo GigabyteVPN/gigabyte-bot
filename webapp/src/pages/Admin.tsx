@@ -4,6 +4,7 @@ import { api, Ticket, Tariff, AdminSearchResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback } from '../lib/telegram';
 import { cn, formatBytes } from '../lib/utils';
+import { useCopy, copyText } from '../lib/use-copy';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { motion } from 'motion/react';
 import { BottomNav, NavTab } from '../components/layout/BottomNav';
@@ -126,15 +127,13 @@ function Segmented({
 }
 
 const CopyCode = ({ value, className }: { value: string; className?: string }) => {
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useCopy();
+  const copied = isCopied('code');
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(value);
-        hapticFeedback.selectionChanged();
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        copy(value, 'code');
       }}
       className={cn('inline-flex items-center gap-1.5 font-mono active:opacity-60', className || 'text-[13px] text-white')}
     >
@@ -786,7 +785,7 @@ function PromoTab() {
     try {
       const res = await api.admin.createPromo(months);
       hapticFeedback.notificationOccurred('success');
-      navigator.clipboard.writeText(res.code);
+      await copyText(res.code);
       tg.showAlert(`✅ Ключ на ${label} создан и скопирован:\n${res.code}`);
       reload();
     } catch (e: any) {
@@ -1468,7 +1467,7 @@ function GiveSubTab() {
     try {
       const res = await api.admin.createSubscription(parseInt(userId, 10), serverId, months);
       hapticFeedback.notificationOccurred('success');
-      navigator.clipboard.writeText(res.sub_link);
+      await copyText(res.sub_link);
       tg.showAlert(`🎉 Подписка создана, пользователь уведомлён.\nСсылка скопирована:\n${res.sub_link}`);
       setUserId('');
       setServerId(null);

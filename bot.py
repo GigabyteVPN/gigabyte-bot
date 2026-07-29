@@ -1857,6 +1857,22 @@ async def subscription_reminders_task(bot_instance: Bot):
             logger.error(f"Ошибка аннулирования зависших платежей: {e}")
         await asyncio.sleep(600)
 
+# ====================== ОТМЕНА ПЛАТЕЖА ======================
+async def cancel_payment(payment_id: int, status: str = "cancelled") -> None:
+    """Помечает платёж отменённым, НЕ удаляя строку.
+
+    Раньше отмена стирала запись насовсем: операция исчезала и из истории
+    пользователя, и из базы — нечем было подтвердить, что человек вообще
+    начинал оплату, и невозможно разобрать спорную ситуацию. Теперь строка
+    остаётся, а из «ожидающих» платёж уходит за счёт смены статуса.
+    """
+    try:
+        await supabase.table("payments").update({"status": status}).eq("id", payment_id).execute()
+        await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+    except Exception as e:
+        logger.error(f"Не удалось отменить платёж {payment_id}: {e}")
+
+
 # ====================== БЭКАП В SUPABASE STORAGE ======================
 # Резервный список на случай, если описание схемы недоступно.
 _BACKUP_TABLES_FALLBACK = [
@@ -2401,8 +2417,7 @@ async def confirm_cancel_callback(callback: CallbackQuery, state: FSMContext):
         # ИСПРАВЛЕНИЕ: проверяем, что платёж принадлежит этому пользователю
         pay = await supabase.table("payments").select("user_id").eq("id", payment_id).execute()
         if pay.data and pay.data[0]["user_id"] == callback.from_user.id:
-            await supabase.table("payments").delete().eq("id", payment_id).execute()
-            await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+            await cancel_payment(payment_id)
     await state.clear()
     await callback.message.edit_text("✅ Оплата отменена, заказ удалён.")
     await callback.message.answer("👋 Главное меню", reply_markup=main_keyboard(is_admin(callback.from_user.id)))
@@ -2689,7 +2704,7 @@ async def trial_server_callback(callback: CallbackQuery, state: FSMContext):
             reply_markup=main_keyboard(is_admin(user_id))
         )
     else:
-        await supabase.table("payments").delete().eq("id", payment_id).execute()
+        await cancel_payment(payment_id, status="failed")
         await callback.message.answer("❌ Ошибка при выдаче тестовой подписки. Обратитесь в поддержку.")
     await state.clear()
     await callback.answer()
@@ -3226,8 +3241,7 @@ async def cancel_crypto_payment(callback: CallbackQuery, state: FSMContext):
         # ИСПРАВЛЕНИЕ: проверяем владельца перед удалением
         pay = await supabase.table("payments").select("user_id").eq("id", payment_id).execute()
         if pay.data and pay.data[0]["user_id"] == callback.from_user.id:
-            await supabase.table("payments").delete().eq("id", payment_id).execute()
-            await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+            await cancel_payment(payment_id)
     await state.clear()
     try:
         await callback.message.delete()
@@ -3301,8 +3315,7 @@ async def process_crypto_hash(message: Message, state: FSMContext):
         if payment_id:
             pay = await supabase.table("payments").select("user_id").eq("id", payment_id).execute()
             if pay.data and pay.data[0]["user_id"] == message.from_user.id:
-                await supabase.table("payments").delete().eq("id", payment_id).execute()
-                await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
+                await cancel_payment(payment_id)
         await state.clear()
         await message.answer("❌ Оплата отменена.", reply_markup=main_keyboard(is_admin(message.from_user.id)))
         return
@@ -4082,9 +4095,8 @@ async def delete_payment_callback(callback: CallbackQuery):
     if not pay.data or pay.data[0]["user_id"] != callback.from_user.id:
         await callback.answer("Это не ваш платёж.", show_alert=True)
         return
-    await supabase.table("payments").delete().eq("id", payment_id).execute()
-    await supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
-    await callback.message.edit_text("✅ Платёж удалён.")
+    await cancel_payment(payment_id)
+    await callback.message.edit_text("✅ Платёж отменён.")
     await callback.answer()
 
 # ====================== ПРОДЛЕНИЕ ======================

@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#05060A">
+<meta name="theme-color" content="#000000">
 <!-- Полноэкранный показ: страница уходит под системные полосы,
      цвет фона совпадает с ними — чёрных «шапок» сверху и снизу нет. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Gigabyte VPN">
-<!-- Скриптов в разметке нет намеренно: политика безопасности (CSP) разрешает
-     только внешние файлы со своего домена, а появление блоков сделано на
-     чистом CSS — страница не может остаться пустой, даже если JS не работает. -->
+<!-- Скриптов в разметке нет намеренно: политика безопасности разрешает
+     только внешние файлы со своего домена, а показ контента не зависит
+     от скриптов вообще — страница не может остаться пустой. -->
 
 <title>VPN для России 2026 — быстрый VPN без логов | Gigabyte VPN</title>
 <meta name="description" content="Быстрый VPN для России: обход блокировок и ТСПУ, скорость до 1 Гбит/с, работает YouTube, Instagram, ChatGPT, Discord. Российские банки и Госуслуги открываются без отключения VPN. Без логов, оплата картой РФ, криптой и Telegram Stars. Пробный доступ бесплатно.">
@@ -37,7 +37,7 @@
 <meta name="twitter:description" content="Обход блокировок и ТСПУ, до 1 Гбит/с, банки РФ работают без отключения VPN. Пробный доступ бесплатно.">
 <meta name="twitter:image" content="https://gigabytebot.com/og.png">
 
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%2300E5C0'/%3E%3Cpath d='M54 20 30 56h16l-4 24 26-38H50z' fill='%2306070B'/%3E%3C/svg%3E">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
@@ -122,12 +122,14 @@
 
 <style>
 /* ═══════════════════════════════════════════════════════════════════════
-   Gigabyte VPN — оформление сайта.
+   Gigabyte VPN — оформление сайта в эстетике iOS.
 
-   Три правила, на которых всё держится:
-   1. Контент виден всегда. Появление блоков — украшение на чистом CSS;
-      если скрипты не отработают, страница остаётся полностью читаемой.
-   2. Размеры текучие (clamp / auto-fit) — от 320 px до 4K без ступенек
+   Правила, на которых всё держится:
+   1. Контент виден всегда. Ни один блок не имеет opacity:0 в обычном
+      состоянии — сайт дважды уходил в чёрный экран, когда показ зависел
+      от чего-то асинхронного. Появление осталось только на первом экране
+      и привязано ко времени, то есть гарантированно доигрывает.
+   2. Размеры текучие (clamp / auto-fit): от 320px до 4K без ступенек
       и без горизонтальной прокрутки.
    3. Ничего внешнего: шрифты системные, графика — inline SVG. Это держит
       строгую политику безопасности и убирает лишние запросы.
@@ -136,41 +138,38 @@
 :root{
   color-scheme:dark;
 
-  /* фон и поверхности */
-  --bg:#05060A;
-  --bg-2:#080A11;
-  --line:rgba(255,255,255,.075);
-  --edge:rgba(255,255,255,.13);
+  /* Системная палитра тёмной темы iOS */
+  --bg:#000000;
+  --card:#1C1C1E;
+  --card-2:#2C2C2E;
+  --card-3:#3A3A3C;
+  --sep:rgba(84,84,88,.55);
+  --hair:rgba(255,255,255,.07);
 
-  /* текст — все три уровня проходят WCAG AA на основном фоне */
-  --txt:#EDF1F8;
-  --txt2:#A2ABBD;
-  --txt3:#8B93A5;
+  --txt:#FFFFFF;
+  --txt-2:rgba(235,235,245,.62);
+  --txt-3:rgba(235,235,245,.55);
 
-  /* акценты */
-  --acc:#00E5C0;
-  --acc-2:#37C8FF;
-  --acc-3:#4D8DFF;
-  --acc-4:#B76BFF;
-  --on-acc:#02120E;
+  --blue:#0A84FF;
+  --indigo:#5E5CE6;
+  --green:#30D158;
+  --orange:#FF9F0A;
+  --pink:#FF375F;
+  --teal:#40C8E0;
 
-  --mono:ui-monospace,"SF Mono","JetBrains Mono","Roboto Mono",Menlo,Consolas,monospace;
-  --sans:-apple-system,BlinkMacSystemFont,"Inter","SF Pro Display","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 
-  /* ритм и форма */
+  /* Скругления в пропорциях iOS */
+  --r-card:22px;
+  --r-lg:28px;
+  --r-xl:36px;
   --pill:999px;
-  --r-xl:34px;
-  --r:26px;
-  --r-s:18px;
-  --maxw:1240px;
-  --pad:clamp(18px,4.2vw,34px);
-  --sec:clamp(62px,8.5vw,120px);
-  --gap:clamp(14px,1.6vw,20px);
 
-  --shadow:0 30px 80px -34px rgba(0,0,0,.9);
-  --hi:inset 0 1px 0 rgba(255,255,255,.09);
-  --ring:0 0 0 3px rgba(0,229,192,.4);
-  --nav-h:68px;
+  --maxw:1080px;
+  --pad:clamp(16px,4.4vw,28px);
+  --sec:clamp(64px,9vw,132px);
+  --nav-h:52px;
 }
 
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -180,567 +179,389 @@ html{
   scroll-behavior:smooth;
   -webkit-text-size-adjust:100%;
   text-size-adjust:100%;
-  scrollbar-color:rgba(255,255,255,.18) transparent;
 }
 body{
   background:var(--bg);
   color:var(--txt);
   font-family:var(--sans);
-  font-size:clamp(15.5px,.4vw + 14.6px,17px);
-  line-height:1.62;
-  letter-spacing:-.005em;
+  font-size:clamp(16px,.35vw + 15.2px,17px);
+  line-height:1.47;
+  letter-spacing:-.01em;
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
   min-height:100dvh;
   overflow-x:clip;
 }
 body.lock{overflow:hidden}
-img,svg,canvas{display:block;max-width:100%}
+img,svg{display:block;max-width:100%}
 a{color:inherit;text-decoration:none}
 button{font:inherit;color:inherit;background:none;border:none}
-::selection{background:var(--acc);color:var(--on-acc)}
-::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:99px;border:3px solid transparent;background-clip:content-box}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28);background-clip:content-box}
+::selection{background:var(--blue);color:#fff}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:99px;border:2px solid transparent;background-clip:content-box}
 
-/* видимый фокус с клавиатуры — без него сайт непроходим без мыши */
-:focus-visible{outline:none;box-shadow:var(--ring)}
-a:focus-visible,button:focus-visible,summary:focus-visible{border-radius:12px}
+/* Видимый фокус с клавиатуры — без него сайт непроходим без мыши */
+:focus-visible{outline:none;box-shadow:0 0 0 4px rgba(10,132,255,.45);border-radius:12px}
 
-/* ─────────────────────────── фон ─────────────────────────── */
-/* Три размытых пятна вместо картинки: дают глубину и «живой» свет,
-   двигаются только через transform — это не нагружает раскладку. */
-.aura{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;contain:strict}
-.aura i{position:absolute;display:block;border-radius:50%;filter:blur(90px);opacity:.5;will-change:transform}
-.aura .a1{width:60vw;height:60vw;max-width:820px;max-height:820px;top:-24vw;left:-10vw;
-  background:radial-gradient(circle,rgba(0,229,192,.42),transparent 68%);animation:drift1 34s ease-in-out infinite}
-.aura .a2{width:52vw;height:52vw;max-width:700px;max-height:700px;top:-8vw;right:-14vw;
-  background:radial-gradient(circle,rgba(77,141,255,.36),transparent 68%);animation:drift2 42s ease-in-out infinite}
-.aura .a3{width:46vw;height:46vw;max-width:620px;max-height:620px;top:34vh;left:38vw;
-  background:radial-gradient(circle,rgba(183,107,255,.24),transparent 70%);animation:drift3 52s ease-in-out infinite}
-@keyframes drift1{50%{transform:translate3d(6vw,5vh,0) scale(1.12)}}
-@keyframes drift2{50%{transform:translate3d(-7vw,7vh,0) scale(1.08)}}
-@keyframes drift3{50%{transform:translate3d(-5vw,-6vh,0) scale(1.14)}}
-
-/* сетка узлов — «дышащая» инфраструктура; canvas не растягивается
-   свойством inset, поэтому размеры заданы явно */
-#net{position:fixed;top:0;left:0;width:100vw;height:100dvh;z-index:1;pointer-events:none;opacity:.5}
-
-/* затемнение по краям, чтобы фон не спорил с текстом */
-.vign{position:fixed;inset:0;z-index:2;pointer-events:none;
-  background:
-    radial-gradient(ellipse 92% 58% at 50% 0%,transparent 26%,rgba(5,6,10,.72) 66%,var(--bg) 88%),
-    linear-gradient(180deg,transparent 60%,var(--bg) 100%)}
-
-/* мельчайшее зерно — убирает «пластиковость» градиентов */
-.grain{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:.032;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
-  background-size:140px 140px}
-
-/* ─────────────────────── каркас и типографика ─────────────────────── */
-.wrap{max-width:var(--maxw);margin-inline:auto;position:relative;z-index:5;
+.wrap{max-width:var(--maxw);margin-inline:auto;position:relative;z-index:2;
   padding-inline:max(var(--pad),env(safe-area-inset-left),env(safe-area-inset-right))}
-section{padding-block:var(--sec);position:relative;scroll-margin-top:calc(var(--nav-h) + 12px)}
-main{position:relative;z-index:5}
+section{padding-block:var(--sec);position:relative;scroll-margin-top:calc(var(--nav-h) + 14px)}
 
-h1,h2,h3,h4{line-height:1.06;letter-spacing:-.032em;font-weight:800;text-wrap:balance}
-h1{font-size:clamp(2.35rem,7.4vw,4.6rem)}
-h2{font-size:clamp(1.75rem,4.4vw,2.95rem)}
+/* ── Типографика в духе Apple: крупно, плотно, по центру ── */
+h1,h2,h3{font-weight:700;letter-spacing:-.035em;line-height:1.05;text-wrap:balance}
+h1{font-size:clamp(2.6rem,8.4vw,5rem)}
+h2{font-size:clamp(2rem,5.6vw,3.4rem)}
+h3{font-size:clamp(1.1rem,1.4vw + .8rem,1.35rem);letter-spacing:-.022em;line-height:1.25}
 p{text-wrap:pretty}
 
-.lead{color:var(--txt2);font-size:clamp(1rem,.5vw + .92rem,1.16rem);max-width:64ch}
-.grad{background:linear-gradient(104deg,var(--acc) 4%,var(--acc-2) 38%,var(--acc-3) 66%,var(--acc-4));
-  -webkit-background-clip:text;background-clip:text;color:transparent;
-  /* курсивные хвосты букв иначе срезаются градиентной маской */
-  padding-inline-end:.06em}
+.eyebrow{display:block;font-size:clamp(.95rem,1.4vw,1.15rem);font-weight:600;letter-spacing:-.01em;
+  background:linear-gradient(96deg,var(--blue),var(--indigo));-webkit-background-clip:text;background-clip:text;
+  color:transparent;margin-bottom:12px}
+.lead{color:var(--txt-2);font-size:clamp(1.05rem,.7vw + .92rem,1.32rem);line-height:1.4;max-width:34ch}
+.sec-head{text-align:center;max-width:min(720px,100%);margin:0 auto clamp(36px,5vw,64px)}
+.sec-head .lead{margin-inline:auto;max-width:44ch}
+.sec-head h2{margin-bottom:16px}
+.grad{background:linear-gradient(96deg,var(--blue),var(--indigo) 55%,var(--teal));
+  -webkit-background-clip:text;background-clip:text;color:transparent;padding-inline-end:.05em}
 
-.tag{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);
-  font-size:clamp(.68rem,.2vw + .64rem,.76rem);letter-spacing:.15em;text-transform:uppercase;
-  color:var(--acc);border:1px solid rgba(0,229,192,.28);background:rgba(0,229,192,.07);
-  padding:7px 15px;border-radius:var(--pill);white-space:nowrap}
+/* ── Кнопки iOS: сплошная синяя «пилюля» и приглушённая вторичная ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font-size:clamp(1rem,.25vw + .95rem,1.06rem);font-weight:590;letter-spacing:-.015em;
+  min-height:52px;padding:15px 30px;border-radius:var(--pill);cursor:pointer;white-space:nowrap;
+  transition:transform .2s cubic-bezier(.2,.7,.3,1),background-color .2s,opacity .2s}
+.btn:active{transform:scale(.96)}
+.b-main{background:var(--blue);color:#fff}
+.b-main:hover{background:#3D9BFF}
+.b-ghost{background:var(--card-2);color:var(--txt)}
+.b-ghost:hover{background:var(--card-3)}
+.btn svg{width:19px;height:19px;flex:0 0 auto}
 
-.sec-head{max-width:min(760px,100%);margin-bottom:clamp(32px,4.4vw,54px)}
-.sec-head h2{margin:16px 0 14px}
-.sec-head.mid{text-align:center;margin-inline:auto}
-.sec-head.mid .lead{margin-inline:auto}
-
-/* ─────────────────────────── стекло ─────────────────────────── */
-/* Грань рисуется градиентом по рамке: сверху светлее, снизу гаснет —
-   так поверхность читается объёмной, а не просто полупрозрачной. */
-.glass,
-.card,.plan,.route,.os,.status,.post,.rev-card,.doc,.trial,.final,
-.faq details{
-  border:1px solid transparent;
-  background:
-    linear-gradient(178deg,rgba(255,255,255,.062),rgba(255,255,255,.022)) padding-box,
-    linear-gradient(160deg,rgba(255,255,255,.20),rgba(255,255,255,.045) 42%,rgba(255,255,255,.13)) border-box;
-  -webkit-backdrop-filter:blur(24px) saturate(1.65);
-  backdrop-filter:blur(24px) saturate(1.65);
-  box-shadow:var(--hi),var(--shadow);
-}
-/* Если размытия фона нет (старые браузеры) — подставляем плотную заливку,
-   иначе полупрозрачные карточки сливаются с фоном и текст плывёт. */
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .glass,.card,.plan,.route,.os,.status,.post,.rev-card,.doc,
-  .faq details{background:linear-gradient(178deg,#11141D,#0B0E15) padding-box,
-    linear-gradient(160deg,rgba(255,255,255,.2),rgba(255,255,255,.05) 42%,rgba(255,255,255,.13)) border-box}
-}
-
-/* ─────────────────────────── кнопки ─────────────────────────── */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;
-  font-weight:650;font-size:clamp(.94rem,.2vw + .9rem,1rem);line-height:1.2;
-  min-height:50px;padding:14px 28px;border-radius:var(--pill);border:1px solid transparent;
-  cursor:pointer;position:relative;overflow:hidden;white-space:nowrap;
-  transition:transform .22s cubic-bezier(.2,.7,.3,1),box-shadow .22s,background-color .22s,border-color .22s}
-.btn svg{width:18px;height:18px;flex:0 0 auto}
-.btn:active{transform:translateY(1px) scale(.99)}
-
-.b-main{background:linear-gradient(102deg,var(--acc),var(--acc-2));color:var(--on-acc);
-  box-shadow:0 0 0 1px rgba(0,229,192,.45),0 14px 44px -14px rgba(0,229,192,.7)}
-/* блик пробегает по кнопке при наведении — тонкий знак «премиум» */
-.b-main::after{content:"";position:absolute;inset:0;
-  background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);
-  transform:translateX(-120%);transition:transform .7s cubic-bezier(.2,.7,.3,1)}
-.b-main:hover{transform:translateY(-2px);box-shadow:0 0 0 1px rgba(0,229,192,.65),0 22px 56px -14px rgba(0,229,192,.85)}
-.b-main:hover::after{transform:translateX(120%)}
-
-.b-ghost{color:var(--txt);border:1px solid transparent;
-  background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.03)) padding-box,
-    linear-gradient(160deg,rgba(255,255,255,.22),rgba(255,255,255,.07)) border-box;
-  -webkit-backdrop-filter:blur(18px) saturate(1.5);backdrop-filter:blur(18px) saturate(1.5)}
-.b-ghost:hover{transform:translateY(-2px);
-  background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.06)) padding-box,
-    linear-gradient(160deg,rgba(255,255,255,.32),rgba(255,255,255,.1)) border-box}
-
-/* ─────────────────────────── навигация ─────────────────────────── */
-/* Полоса прогресса чтения — на CSS, без единой строки скрипта. */
-.progress{position:fixed;top:0;left:0;right:0;height:2px;z-index:96;transform:scaleX(0);transform-origin:0 50%;
-  background:linear-gradient(90deg,var(--acc),var(--acc-3) 55%,var(--acc-4))}
-@supports (animation-timeline:scroll()){
-  .progress{animation:grow linear both;animation-timeline:scroll(root block)}
-}
-@keyframes grow{to{transform:scaleX(1)}}
-
-header.nav{position:fixed;top:0;left:0;right:0;z-index:95;padding-top:env(safe-area-inset-top);
-  border-bottom:1px solid transparent;transition:background-color .3s,border-color .3s,backdrop-filter .3s}
-header.nav.on{background:rgba(5,6,10,.74);border-bottom-color:var(--line);
-  -webkit-backdrop-filter:blur(22px) saturate(1.7);backdrop-filter:blur(22px) saturate(1.7)}
+/* ── Панель навигации: размытая, с волосяной линией снизу ── */
+header.nav{position:fixed;top:0;left:0;right:0;z-index:90;padding-top:env(safe-area-inset-top);
+  background:rgba(0,0,0,.72);-webkit-backdrop-filter:saturate(180%) blur(22px);
+  backdrop-filter:saturate(180%) blur(22px);
+  border-bottom:.5px solid transparent;transition:border-color .3s}
+header.nav.on{border-bottom-color:var(--sep)}
 .nav-in{max-width:var(--maxw);margin-inline:auto;min-height:var(--nav-h);
-  padding:12px max(var(--pad),env(safe-area-inset-left)) 12px max(var(--pad),env(safe-area-inset-right));
+  padding:8px max(var(--pad),env(safe-area-inset-right)) 8px max(var(--pad),env(safe-area-inset-left));
   display:flex;align-items:center;justify-content:space-between;gap:14px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.06rem;letter-spacing:-.025em;flex:0 0 auto}
-.brand .m{width:30px;height:30px;flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:9px;font-size:1.06rem;font-weight:600;letter-spacing:-.022em;
+  padding-block:6px;flex:0 0 auto}
+.brand img{width:28px;height:28px;border-radius:7px}
 .nav-l{display:flex;gap:2px;min-width:0}
-.nav-l a{font-size:.9rem;color:var(--txt2);padding:9px 14px;border-radius:var(--pill);font-weight:500;
-  transition:color .2s,background-color .2s;white-space:nowrap}
-.nav-l a:hover{color:var(--txt);background:rgba(255,255,255,.07)}
+.nav-l a{font-size:.88rem;color:var(--txt-2);padding:8px 12px;border-radius:9px;font-weight:450;
+  min-height:38px;display:inline-flex;align-items:center;white-space:nowrap;transition:color .2s}
+.nav-l a:hover{color:var(--txt)}
 .nav-r{display:flex;align-items:center;gap:10px;flex:0 0 auto}
-.lang{display:flex;border-radius:var(--pill);overflow:hidden;border:1px solid var(--edge);
-  background:rgba(255,255,255,.05);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
-.lang button{color:var(--txt3);padding:8px 12px;cursor:pointer;font-family:var(--mono);
-  font-size:.74rem;font-weight:600;transition:color .2s,background-color .2s}
-.lang button:hover{color:var(--txt)}
-.lang button.on{background:var(--acc);color:var(--on-acc)}
 
-.burger{display:none;flex-direction:column;justify-content:center;gap:5px;
-  width:46px;height:46px;align-items:center;border-radius:var(--pill);cursor:pointer;
-  border:1px solid var(--edge);background:rgba(255,255,255,.05)}
-.burger span{width:19px;height:2px;background:var(--txt);border-radius:2px;transition:transform .3s,opacity .3s}
+/* Сегментированный переключатель языка — как в системных настройках */
+.seg{display:flex;background:var(--card-2);border-radius:9px;padding:2px;gap:2px}
+.seg button{padding:8px 12px;border-radius:7px;font-size:.78rem;font-weight:590;color:var(--txt-2);
+  cursor:pointer;min-height:36px;transition:background-color .2s,color .2s}
+.seg button.on{background:var(--card-3);color:var(--txt);box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.nav-r .btn{min-height:38px;padding:9px 19px;font-size:.92rem}
 
-.mob{position:fixed;inset:0;z-index:200;background:rgba(5,6,10,.97);
-  -webkit-backdrop-filter:blur(26px) saturate(1.6);backdrop-filter:blur(26px) saturate(1.6);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:clamp(14px,3.4vh,26px);padding:calc(env(safe-area-inset-top) + 76px) var(--pad) calc(env(safe-area-inset-bottom) + 28px);
-  overflow-y:auto;visibility:hidden;opacity:0;transform:translateY(-14px);
-  transition:opacity .32s ease,transform .32s cubic-bezier(.2,.7,.3,1),visibility 0s .32s}
-.mob.open{visibility:visible;opacity:1;transform:none;transition-delay:0s}
-.mob a:not(.btn){font-size:clamp(1.2rem,5vw,1.5rem);font-weight:700}
-.mob .btn{margin-top:8px}
+.burger{display:none;width:40px;height:40px;border-radius:11px;background:var(--card-2);
+  cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:4.5px}
+.burger span{width:17px;height:1.7px;background:var(--txt);border-radius:2px}
+
+.mob{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.94);
+  -webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px);
+  display:flex;flex-direction:column;align-items:stretch;justify-content:center;
+  gap:6px;padding:calc(env(safe-area-inset-top) + 78px) var(--pad) calc(env(safe-area-inset-bottom) + 24px);
+  overflow-y:auto;visibility:hidden;opacity:0;transition:opacity .3s,visibility 0s .3s}
+.mob.open{visibility:visible;opacity:1;transition-delay:0s}
+.mob a:not(.btn){font-size:1.2rem;font-weight:590;letter-spacing:-.02em;padding:15px 20px;
+  border-radius:16px;background:var(--card);display:flex;align-items:center;justify-content:space-between}
+.mob a:not(.btn)::after{content:"";width:7px;height:7px;border-right:2px solid var(--txt-3);
+  border-bottom:2px solid var(--txt-3);transform:rotate(-45deg)}
+.mob .btn{margin-top:14px}
 .mob .x{position:absolute;top:calc(env(safe-area-inset-top) + 16px);right:var(--pad);
-  width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.07);border:1px solid var(--edge);color:var(--txt);font-size:1.4rem;cursor:pointer}
+  width:40px;height:40px;border-radius:50%;background:var(--card-2);color:var(--txt);
+  display:flex;align-items:center;justify-content:center;font-size:1.3rem;cursor:pointer}
 
-/* ─────────────────────────── первый экран ─────────────────────────── */
-.hero{padding-top:calc(var(--nav-h) + env(safe-area-inset-top) + clamp(48px,11vh,110px));
-  padding-bottom:clamp(44px,7vw,80px)}
-.hero h1{max-width:15ch;margin:clamp(16px,2.4vw,26px) 0 clamp(14px,2vw,22px)}
-.hero .lead{font-size:clamp(1.02rem,.6vw + .92rem,1.28rem)}
-.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:clamp(26px,3.6vw,38px)}
-.hero-note{margin-top:16px;font-family:var(--mono);font-size:clamp(.74rem,.25vw + .7rem,.82rem);color:var(--txt3)}
-.live{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--acc);flex:0 0 auto;
-  box-shadow:0 0 0 0 rgba(0,229,192,.6);animation:pulse 2.4s infinite}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(0,229,192,.5)}70%{box-shadow:0 0 0 9px rgba(0,229,192,0)}100%{box-shadow:0 0 0 0 rgba(0,229,192,0)}}
+/* ── Первый экран ── */
+.hero{padding-top:calc(var(--nav-h) + env(safe-area-inset-top) + clamp(52px,11vh,104px));
+  padding-bottom:clamp(20px,4vw,44px);text-align:center}
+.hero h1{margin-bottom:clamp(16px,2.2vw,24px)}
+.hero .lead{margin:0 auto;max-width:36ch}
+.cta{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:clamp(26px,3.4vw,36px)}
+.hero-note{margin-top:18px;font-size:.88rem;color:var(--txt-3)}
 
-/* показатели: колонок ровно столько, сколько помещается */
-.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;
-  margin-top:clamp(38px,5vw,64px);background:var(--line);border-radius:var(--r);overflow:hidden;
-  border:1px solid transparent;
-  background-image:linear-gradient(var(--line),var(--line)) padding-box,
-    linear-gradient(160deg,rgba(255,255,255,.2),rgba(255,255,255,.05) 45%,rgba(255,255,255,.13)) border-box;
-  box-shadow:var(--hi),var(--shadow)}
-.kpi div{background:rgba(10,12,19,.55);-webkit-backdrop-filter:blur(20px) saturate(1.6);
-  backdrop-filter:blur(20px) saturate(1.6);padding:clamp(18px,2.4vw,26px) clamp(16px,2vw,22px)}
-.kpi b{display:block;font-family:var(--mono);font-weight:800;letter-spacing:-.035em;
-  font-size:clamp(1.5rem,3.2vw,2.25rem);
-  background:linear-gradient(160deg,#fff,#B8C2D4);-webkit-background-clip:text;background-clip:text;color:transparent}
-.kpi span{font-size:clamp(.78rem,.25vw + .74rem,.85rem);color:var(--txt3);display:block;margin-top:4px}
+/* Макет телефона: показываем сам продукт, а не абстракции */
+.device-wrap{display:flex;justify-content:center;padding-bottom:var(--sec);
+  padding-inline:max(var(--pad),env(safe-area-inset-left))}
+.device{width:min(300px,78vw);aspect-ratio:9/19.5;border-radius:min(46px,12vw);padding:10px;
+  background:linear-gradient(160deg,#3A3A3C,#1C1C1E 40%,#2C2C2E);
+  box-shadow:0 50px 100px -40px rgba(10,132,255,.5),0 0 0 .5px rgba(255,255,255,.14);
+  position:relative}
+.screen{width:100%;height:100%;border-radius:min(37px,9.4vw);overflow:hidden;position:relative;
+  background:radial-gradient(120% 80% at 50% 0%,#12233F,#000 62%);
+  display:flex;flex-direction:column;gap:9px;padding:34px 13px 16px}
+.notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:34%;height:19px;
+  background:#000;border-radius:99px;z-index:2}
+.s-row{background:rgba(255,255,255,.08);border-radius:13px;padding:10px 12px;
+  display:flex;align-items:center;gap:9px}
+.s-row .ic{width:26px;height:26px;border-radius:8px;flex:0 0 auto;
+  background:linear-gradient(160deg,var(--blue),var(--indigo));display:flex;align-items:center;justify-content:center}
+.s-row .ic svg{width:14px;height:14px;color:#fff}
+.s-line{height:6px;border-radius:99px;background:rgba(255,255,255,.22)}
+.s-line.s{width:52%}
+.s-line.m{width:72%}
+.s-col{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0}
+.s-hero{background:linear-gradient(150deg,var(--blue),var(--indigo));border-radius:16px;
+  padding:14px;display:flex;flex-direction:column;gap:7px}
+.s-hero .big{font-size:20px;font-weight:700;letter-spacing:-.03em}
+.s-hero .sm{font-size:10.5px;opacity:.85}
+.s-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:0 0 auto;
+  box-shadow:0 0 0 0 rgba(48,209,88,.6);animation:ping 2.2s infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(48,209,88,.55)}70%{box-shadow:0 0 0 8px rgba(48,209,88,0)}100%{box-shadow:0 0 0 0 rgba(48,209,88,0)}}
 
-/* ────────────────────── лента сервисов ────────────────────── */
-/* Высота задана заранее и содержимое лежит в разметке — блок не «прыгает»
-   после загрузки и индексируется поисковиками как обычный текст. */
-.marq{position:relative;z-index:5;display:flex;align-items:center;overflow:hidden;
-  height:clamp(74px,8.4vw,92px);border-block:1px solid var(--line);background:rgba(8,10,17,.6);
-  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-  -webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent);
-  mask-image:linear-gradient(90deg,transparent,#000 7%,#000 93%,transparent)}
-.marq-row{display:flex;gap:12px;width:max-content;padding-inline:6px;animation:slide 46s linear infinite}
-.marq:hover .marq-row{animation-play-state:paused}
-@keyframes slide{to{transform:translateX(-50%)}}
-.chip{display:inline-flex;align-items:center;gap:9px;padding:10px 18px;border:1px solid var(--line);
-  border-radius:var(--pill);font-size:clamp(.85rem,.25vw + .8rem,.92rem);color:var(--txt2);
-  background:rgba(255,255,255,.03);white-space:nowrap}
-.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--acc);flex:0 0 auto;opacity:.85}
+/* ── Сгруппированные списки — основа интерфейса iOS ── */
+.group{background:var(--card);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:14px;padding:15px 18px;position:relative;width:100%;text-align:left}
+.row + .row::before{content:"";position:absolute;top:0;left:64px;right:0;height:.5px;background:var(--sep)}
+.row .ic{width:32px;height:32px;border-radius:9px;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+.row .ic svg{width:18px;height:18px;color:#fff}
+.row .tx{flex:1;min-width:0}
+.row .tx b{display:block;font-size:1rem;font-weight:510;letter-spacing:-.018em}
+.row .tx span{display:block;font-size:.88rem;color:var(--txt-2);margin-top:2px;line-height:1.35}
+.row .val{font-size:.92rem;color:var(--txt-3);white-space:nowrap;flex:0 0 auto}
+.chev{width:8px;height:8px;border-right:2px solid var(--txt-3);border-bottom:2px solid var(--txt-3);
+  transform:rotate(-45deg);flex:0 0 auto;margin-left:2px}
+.group-title{font-size:.8rem;font-weight:590;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--txt-3);margin:0 0 9px 18px}
 
-/* ─────────────────────────── карточки ─────────────────────────── */
-.grid{display:grid;gap:var(--gap)}
-.g3{grid-template-columns:repeat(auto-fit,minmax(min(100%,282px),1fr))}
-.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr))}
+/* Цвета значков — как у системных иконок настроек */
+.i-blue{background:var(--blue)}.i-indigo{background:var(--indigo)}.i-green{background:var(--green)}
+.i-orange{background:var(--orange)}.i-pink{background:var(--pink)}.i-teal{background:var(--teal)}
+.i-gray{background:var(--card-3)}
 
-.card{border-radius:var(--r);padding:clamp(22px,2.6vw,30px);position:relative;overflow:hidden;
-  display:flex;flex-direction:column;
-  transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s}
-/* мягкое свечение под курсором: координаты ставит скрипт, но без него
-   карточка просто остаётся обычной — ничего не ломается */
-.card::before{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;
-  transition:opacity .35s;
-  background:radial-gradient(340px circle at var(--mx,50%) var(--my,0%),rgba(0,229,192,.14),transparent 62%)}
-.card:hover{transform:translateY(-4px);box-shadow:var(--hi),0 34px 80px -34px rgba(0,229,192,.34)}
-.card:hover::before{opacity:1}
-.card .ic{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  margin-bottom:18px;background:rgba(0,229,192,.1);border:1px solid rgba(0,229,192,.24)}
-.card .ic svg{width:22px;height:22px;color:var(--acc)}
-.card h3{font-size:clamp(1.1rem,.5vw + 1rem,1.24rem);margin-bottom:9px;font-weight:700;letter-spacing:-.02em}
-.card p{color:var(--txt2);font-size:clamp(.92rem,.25vw + .88rem,.97rem)}
-/* подпись-«техничка» всегда прижата к низу карточки — так строки
-   выравниваются между собой при разной длине текста */
-.card .mono{font-family:var(--mono);font-size:.77rem;color:var(--txt3);display:block;
-  margin-top:auto;padding-top:16px;word-break:break-word}
+/* ── Крупные карточки возможностей ── */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,286px),1fr));gap:clamp(12px,1.4vw,18px)}
+.tile{background:var(--card);border-radius:var(--r-lg);padding:clamp(24px,2.6vw,32px);
+  display:flex;flex-direction:column;position:relative;overflow:hidden;
+  transition:transform .32s cubic-bezier(.2,.7,.3,1),background-color .32s}
+.tile::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .35s;
+  background:radial-gradient(340px circle at var(--mx,50%) var(--my,0%),rgba(10,132,255,.18),transparent 62%)}
+.tile:hover{transform:translateY(-4px);background:#202022}
+.tile:hover::before{opacity:1}
+.tile .ic{width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;margin-bottom:20px}
+.tile .ic svg{width:24px;height:24px;color:#fff}
+.tile h3{margin-bottom:9px}
+.tile p{color:var(--txt-2);font-size:.97rem;line-height:1.45}
+.tile .note{margin-top:auto;padding-top:18px;font-family:var(--mono);font-size:.74rem;color:var(--txt-3);
+  overflow-wrap:anywhere}
 
-/* ────────────────────── схема маршрутизации ────────────────────── */
-.route{border-radius:var(--r);padding:clamp(22px,3vw,34px)}
-.route-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-family:var(--mono);
-  font-size:clamp(.8rem,.3vw + .74rem,.88rem)}
-.route-row + .route-row{margin-top:14px}
-.node{padding:10px 18px;border:1px solid var(--edge);border-radius:var(--pill);
-  background:rgba(255,255,255,.05)}
-.node.hi{border-color:rgba(0,229,192,.42);color:var(--acc);background:rgba(0,229,192,.08)}
-.arrow{color:var(--txt3);flex:0 0 auto}
-.route > p{margin-top:18px;color:var(--txt2);font-size:clamp(.9rem,.25vw + .86rem,.96rem)}
+/* ── Схема маршрутизации ── */
+.route{background:var(--card);border-radius:var(--r-lg);padding:clamp(22px,3vw,36px);
+  display:flex;flex-direction:column;gap:14px}
+.path{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.node{background:var(--card-2);border-radius:var(--pill);padding:10px 17px;font-size:.9rem;font-weight:500}
+.node.hi{background:rgba(10,132,255,.18);color:#6FB6FF}
+.node.ru{background:rgba(48,209,88,.16);color:#5EE07E}
+.arrow{color:var(--txt-3);flex:0 0 auto;font-size:.95rem}
+.route p{color:var(--txt-2);font-size:.95rem;margin-top:6px}
 
-/* ─────────────────────────── тарифы ─────────────────────────── */
-.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,218px),1fr));gap:var(--gap)}
-.plan{position:relative;border-radius:var(--r);padding:clamp(22px,2.4vw,28px);display:flex;flex-direction:column;
-  transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s}
-.plan:hover{transform:translateY(-5px)}
-.plan.best{background:
-    linear-gradient(178deg,rgba(0,229,192,.13),rgba(255,255,255,.028) 52%) padding-box,
-    linear-gradient(160deg,rgba(0,229,192,.62),rgba(0,229,192,.14) 48%,rgba(255,255,255,.12)) border-box;
-  box-shadow:var(--hi),0 34px 80px -34px rgba(0,229,192,.45)}
-/* запас сверху одинаковый у всех карточек, чтобы цены стояли на одной линии */
-.plans .plan{padding-top:calc(clamp(22px,2.4vw,28px) + 14px)}
-.plan .lbl{font-family:var(--mono);font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3)}
-.plan .best-tag{position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:.63rem;
-  letter-spacing:.1em;text-transform:uppercase;color:var(--on-acc);background:var(--acc);
-  padding:5px 12px;border-radius:var(--pill);box-shadow:0 8px 24px -10px rgba(0,229,192,.9)}
-.plan .amt{font-family:var(--mono);font-size:clamp(2rem,1.4vw + 1.7rem,2.5rem);font-weight:800;
-  letter-spacing:-.04em;margin:8px 0 2px;line-height:1}
-.plan .per{font-size:.83rem;color:var(--txt3);margin-bottom:20px}
-.plan ul{list-style:none;display:flex;flex-direction:column;gap:10px;margin-bottom:22px;flex:1}
-.plan li{display:flex;gap:9px;font-size:.92rem;color:var(--txt2)}
-.plan li svg{width:16px;height:16px;color:var(--acc);flex:0 0 auto;margin-top:4px}
-.plan .btn{width:100%}
-.pay-note{text-align:center;margin-top:26px;color:var(--txt3);font-family:var(--mono);
-  font-size:clamp(.79rem,.25vw + .75rem,.9rem)}
+/* ── Тарифы ── */
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,214px),1fr));gap:clamp(12px,1.4vw,16px)}
+.plan{background:var(--card);border-radius:var(--r-lg);padding:26px 22px 22px;position:relative;
+  display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.2,.7,.3,1)}
+.plan:hover{transform:translateY(-4px)}
+.plan.best{background:linear-gradient(165deg,rgba(10,132,255,.2),var(--card) 62%);
+  box-shadow:inset 0 0 0 1.5px rgba(10,132,255,.55)}
+.plan .tag{position:absolute;top:14px;right:14px;background:var(--blue);color:#fff;
+  font-size:.66rem;font-weight:640;letter-spacing:.03em;text-transform:uppercase;
+  padding:5px 11px;border-radius:var(--pill)}
+.plan .per{font-size:.84rem;color:var(--txt-3);font-weight:500}
+.plan .amt{font-size:clamp(2.1rem,1.4vw + 1.8rem,2.6rem);font-weight:700;letter-spacing:-.04em;
+  line-height:1;margin:10px 0 4px}
+.plan .mo{font-size:.86rem;color:var(--txt-2);margin-bottom:20px}
+.plan ul{list-style:none;display:flex;flex-direction:column;gap:11px;margin-bottom:22px;flex:1}
+.plan li{display:flex;gap:9px;font-size:.92rem;color:var(--txt-2);align-items:flex-start}
+.plan li svg{width:16px;height:16px;color:var(--blue);flex:0 0 auto;margin-top:3px}
+.plan .btn{width:100%;min-height:46px;font-size:.97rem}
+.pay-note{text-align:center;margin-top:26px;color:var(--txt-3);font-size:.88rem}
 
-/* ─────────────────────── пробный доступ ─────────────────────── */
-.trial{border-radius:var(--r-xl);padding:clamp(22px,3.4vw,40px);
-  background:
-    linear-gradient(140deg,rgba(0,229,192,.13),rgba(77,141,255,.07) 52%,rgba(183,107,255,.06)) padding-box,
-    linear-gradient(160deg,rgba(0,229,192,.5),rgba(255,255,255,.07) 46%,rgba(77,141,255,.34)) border-box}
-.trial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,304px),1fr));
-  gap:clamp(24px,3.4vw,40px);align-items:center}
-.trial h2{margin:16px 0 14px;font-size:clamp(1.55rem,3.4vw,2.3rem)}
-.trial .lead{font-size:clamp(.98rem,.3vw + .92rem,1.04rem)}
-.steps{display:flex;flex-direction:column;gap:14px;margin-top:22px}
-.step{display:flex;gap:14px}
-.step b{flex:0 0 auto;width:28px;height:28px;border-radius:50%;background:var(--acc);color:var(--on-acc);
-  display:flex;align-items:center;justify-content:center;font-size:.8rem;font-family:var(--mono)}
-.step p{font-size:clamp(.9rem,.25vw + .86rem,.96rem);color:var(--txt2)}
-.key-lbl{font-family:var(--mono);font-size:.73rem;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--txt3);margin-bottom:10px}
-.field{background:rgba(0,0,0,.4);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
-  border:1px solid var(--edge);border-radius:var(--r);padding:12px 12px 12px 20px;
-  display:flex;align-items:center;gap:12px}
-.field code{font-family:var(--mono);font-size:clamp(.68rem,.35vw + .6rem,.77rem);color:var(--acc);
-  overflow-wrap:anywhere;flex:1;line-height:1.55;min-width:0}
-.copy{flex:0 0 auto;width:46px;height:46px;border-radius:50%;background:var(--acc);color:var(--on-acc);
-  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .2s,box-shadow .2s}
-.copy:hover{transform:translateY(-2px);box-shadow:0 12px 30px -12px rgba(0,229,192,.9)}
+/* ── Пробный доступ ── */
+.trial{background:linear-gradient(158deg,rgba(10,132,255,.22),rgba(94,92,230,.12) 55%,var(--card) 100%);
+  border-radius:var(--r-xl);padding:clamp(24px,3.6vw,44px)}
+.trial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));
+  gap:clamp(24px,3.4vw,44px);align-items:center}
+.trial h2{font-size:clamp(1.7rem,3.6vw,2.5rem);margin-bottom:14px}
+.trial .lead{max-width:100%;font-size:1.02rem}
+.steps{display:flex;flex-direction:column;gap:15px;margin-top:24px}
+.step{display:flex;gap:13px;align-items:flex-start}
+.step b{flex:0 0 auto;width:25px;height:25px;border-radius:50%;background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:.77rem;font-weight:640}
+.step p{font-size:.95rem;color:var(--txt-2);padding-top:2px}
+.key-lbl{font-size:.8rem;font-weight:590;letter-spacing:.02em;text-transform:uppercase;
+  color:var(--txt-3);margin-bottom:10px}
+/* Плашка ключа: в приложении копирование выглядит так же */
+.field{background:rgba(0,0,0,.45);border-radius:var(--r-card);padding:14px 14px 14px 18px;
+  display:flex;align-items:center;gap:12px;cursor:pointer}
+.field code{font-family:var(--mono);font-size:clamp(.7rem,.35vw + .62rem,.78rem);color:#6FB6FF;
+  overflow-wrap:anywhere;flex:1;line-height:1.5;min-width:0}
+.copy{flex:0 0 auto;width:42px;height:42px;border-radius:50%;background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .2s}
+.copy:active{transform:scale(.92)}
 .copy svg{width:18px;height:18px}
-.apps{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
-.apps a{font-size:.85rem;color:var(--txt2);border:1px solid var(--edge);padding:10px 18px;
-  border-radius:var(--pill);background:rgba(255,255,255,.05);transition:color .2s,border-color .2s}
-.apps a:hover{border-color:rgba(0,229,192,.4);color:var(--txt)}
-.key-note{font-size:.83rem;color:var(--txt3);margin-top:14px}
+.apps{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+.apps a{font-size:.88rem;color:var(--txt);background:var(--card-2);padding:11px 18px;
+  border-radius:var(--pill);min-height:44px;display:inline-flex;align-items:center;transition:background-color .2s}
+.apps a:hover{background:var(--card-3)}
+.key-note{font-size:.85rem;color:var(--txt-3);margin-top:14px;line-height:1.45}
 
-/* ─────────────────────────── установка ─────────────────────────── */
-.os{border-radius:var(--r);padding:clamp(22px,2.6vw,30px)}
-.os h3{font-size:clamp(1.08rem,.5vw + 1rem,1.2rem);margin-bottom:4px}
-.os .rec{font-family:var(--mono);font-size:.79rem;color:var(--acc);margin-bottom:18px}
-.os ol{list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:12px}
-.os li{counter-increment:s;position:relative;padding-left:36px;
-  font-size:clamp(.9rem,.25vw + .86rem,.95rem);color:var(--txt2)}
-.os li::before{content:counter(s);position:absolute;left:0;top:1px;width:24px;height:24px;border-radius:50%;
-  background:rgba(255,255,255,.06);border:1px solid var(--line);font-family:var(--mono);font-size:.73rem;
-  display:flex;align-items:center;justify-content:center;color:var(--acc)}
+/* ── Установка ── */
+.os-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:clamp(12px,1.4vw,18px)}
+.os{background:var(--card);border-radius:var(--r-lg);padding:clamp(24px,2.6vw,32px)}
+.os h3{margin-bottom:4px}
+.os .rec{font-size:.86rem;color:var(--blue);font-weight:510;margin-bottom:20px}
+.os ol{list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:13px}
+.os li{counter-increment:s;position:relative;padding-left:34px;font-size:.94rem;color:var(--txt-2)}
+.os li::before{content:counter(s);position:absolute;left:0;top:0;width:23px;height:23px;border-radius:50%;
+  background:var(--card-2);font-size:.74rem;font-weight:640;color:var(--txt);
+  display:flex;align-items:center;justify-content:center}
 
-/* ─────────────────────────── вопросы ─────────────────────────── */
-.faq{max-width:840px;margin-inline:auto;display:flex;flex-direction:column;gap:10px}
-.faq details{border-radius:var(--r);padding-inline:clamp(18px,2.2vw,26px)}
-.faq details[open]{background:
-    linear-gradient(178deg,rgba(0,229,192,.07),rgba(255,255,255,.022)) padding-box,
-    linear-gradient(160deg,rgba(0,229,192,.4),rgba(255,255,255,.06) 50%,rgba(255,255,255,.12)) border-box}
-.faq summary{padding:19px 0;font-weight:650;font-size:clamp(.97rem,.3vw + .92rem,1.04rem);cursor:pointer;
+/* ── Вопросы: раскрывающиеся строки списка ── */
+.faq{max-width:760px;margin-inline:auto;background:var(--card);border-radius:var(--r-card);overflow:hidden}
+.faq details + details{border-top:.5px solid var(--sep)}
+.faq summary{padding:17px 20px;font-size:1rem;font-weight:510;letter-spacing:-.018em;cursor:pointer;
   list-style:none;display:flex;justify-content:space-between;gap:16px;align-items:center}
 .faq summary::-webkit-details-marker{display:none}
-.faq summary::after{content:"";width:9px;height:9px;flex:0 0 auto;margin-top:-4px;
-  border-right:2px solid var(--acc);border-bottom:2px solid var(--acc);
-  transform:rotate(45deg);transition:transform .28s,margin .28s}
-.faq details[open] summary::after{transform:rotate(-135deg);margin-top:4px}
-.faq details p{padding:0 0 20px;color:var(--txt2);font-size:clamp(.9rem,.25vw + .86rem,.96rem)}
+.faq summary::after{content:"";width:8px;height:8px;flex:0 0 auto;
+  border-right:2px solid var(--txt-3);border-bottom:2px solid var(--txt-3);
+  transform:rotate(45deg);transition:transform .28s;margin-top:-3px}
+.faq details[open] summary::after{transform:rotate(-135deg);margin-top:3px}
+.faq details p{padding:0 20px 18px;color:var(--txt-2);font-size:.94rem;line-height:1.5}
 
-/* ────────────────────── состояние сети ────────────────────── */
-.status{border-radius:var(--r);padding:4px clamp(18px,2.6vw,30px);max-width:740px;margin-inline:auto}
-.srv{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 0;
-  border-bottom:1px solid var(--line);font-size:clamp(.9rem,.25vw + .86rem,.97rem)}
-.srv:last-child{border-bottom:none}
-.srv .ok{display:inline-flex;align-items:center;gap:8px;color:var(--acc);font-family:var(--mono);font-size:.83rem}
-.srv .soon{color:var(--txt3);font-family:var(--mono);font-size:.83rem;white-space:nowrap}
+/* ── Отзывы (заполняется автоматически) ── */
+.rating-hero{display:flex;align-items:center;justify-content:center;gap:22px;flex-wrap:wrap;margin-bottom:28px}
+.rating-hero .big{font-size:clamp(2.8rem,6vw,3.6rem);font-weight:700;letter-spacing:-.04em;line-height:1}
+.rating-hero .stars{color:var(--orange);font-size:1.2rem;letter-spacing:.1em}
+.rating-hero .cnt{color:var(--txt-3);font-size:.88rem;margin-top:4px}
+.revs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,262px),1fr));gap:12px}
+.rev-card{background:var(--card);border-radius:var(--r-card);padding:20px}
+.rev-card .s{color:var(--orange);font-size:.92rem;letter-spacing:.08em}
+.rev-card p{margin-top:9px;color:var(--txt-2);font-size:.93rem;line-height:1.45}
+.rev-card .who{margin-top:12px;font-size:.82rem;color:var(--txt-3)}
 
-/* ─────────────────────────── журнал ─────────────────────────── */
-.post{border-radius:var(--r);padding:clamp(20px,2.4vw,26px);
-  transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s}
-.post:hover{transform:translateY(-4px);box-shadow:var(--hi),0 30px 70px -34px rgba(0,229,192,.3)}
-.post time{font-family:var(--mono);font-size:.75rem;color:var(--acc)}
-.post h3{font-size:clamp(1.02rem,.4vw + .96rem,1.12rem);margin:10px 0;font-weight:700}
-.post p{font-size:clamp(.88rem,.25vw + .84rem,.93rem);color:var(--txt2)}
-
-/* ─────────────────────────── отзывы ─────────────────────────── */
-.rating-hero{display:flex;align-items:center;gap:22px;flex-wrap:wrap;justify-content:center;margin-bottom:34px}
-.rating-hero .big{font-family:var(--mono);font-size:clamp(2.6rem,6vw,3.4rem);font-weight:800;
-  letter-spacing:-.04em;line-height:1}
-.rating-hero .stars{color:var(--acc);font-size:1.25rem;letter-spacing:.12em}
-.rating-hero .cnt{color:var(--txt3);font-size:.89rem}
-.revs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr));gap:var(--gap)}
-.rev-card{border-radius:var(--r);padding:clamp(20px,2.4vw,26px)}
-.rev-card .s{color:var(--acc);font-size:.95rem;letter-spacing:.1em}
-.rev-card p{margin-top:10px;color:var(--txt2);font-size:.94rem}
-.rev-card .who{margin-top:14px;font-size:.84rem;color:var(--txt3);font-family:var(--mono)}
-
-/* ─────────────────────────── документы ─────────────────────────── */
-.docs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,244px),1fr));gap:var(--gap)}
-.doc{border-radius:var(--r);padding:22px;cursor:pointer;display:flex;align-items:center;gap:14px;
-  transition:transform .28s cubic-bezier(.2,.7,.3,1),box-shadow .28s}
-.doc:hover{transform:translateY(-3px);box-shadow:var(--hi),0 26px 60px -32px rgba(0,229,192,.34)}
-.doc .ic{width:42px;height:42px;flex:0 0 auto;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;background:rgba(0,229,192,.1);border:1px solid rgba(0,229,192,.24)}
-.doc .ic svg{width:20px;height:20px;color:var(--acc)}
-.doc h3{font-size:clamp(.94rem,.3vw + .9rem,1rem);font-weight:650;letter-spacing:-.015em}
-
-/* ────────────────────── финальный призыв ────────────────────── */
-.final{border-radius:var(--r-xl);padding:clamp(30px,5vw,60px) clamp(22px,4vw,44px);text-align:center;
-  background:
-    linear-gradient(140deg,rgba(0,229,192,.14),rgba(77,141,255,.08) 50%,rgba(183,107,255,.1)) padding-box,
-    linear-gradient(160deg,rgba(0,229,192,.5),rgba(255,255,255,.07) 46%,rgba(183,107,255,.4)) border-box}
+/* ── Финальный призыв ── */
+.final{text-align:center;background:linear-gradient(158deg,rgba(10,132,255,.24),rgba(94,92,230,.14) 55%,var(--card));
+  border-radius:var(--r-xl);padding:clamp(36px,5.6vw,72px) clamp(22px,4vw,48px)}
 .final h2{margin-bottom:14px}
-.final .lead{margin:0 auto 28px}
+.final .lead{margin:0 auto 30px;max-width:40ch}
 
-/* ─────────────────────────── подвал ─────────────────────────── */
-footer{position:relative;z-index:5;border-top:1px solid var(--line);background:var(--bg-2);
-  padding-block:clamp(40px,5vw,58px) calc(clamp(26px,3vw,34px) + env(safe-area-inset-bottom))}
-.foot{display:grid;grid-template-columns:minmax(240px,2fr) repeat(3,minmax(130px,1fr));
-  gap:clamp(24px,3vw,38px)}
-.foot p{color:var(--txt2);font-size:.89rem;margin-bottom:6px}
-.foot h3{font-family:var(--mono);font-size:.73rem;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--txt3);margin-bottom:14px;font-weight:600;line-height:1.4}
-.foot ul{list-style:none;display:flex;flex-direction:column;gap:9px}
-.foot ul a{color:var(--txt2);font-size:.89rem;transition:color .2s}
-.foot ul a:hover{color:var(--acc)}
-.foot .tg{color:var(--acc)}
+/* ── Подвал ── */
+footer{border-top:.5px solid var(--sep);padding-block:clamp(38px,4.6vw,56px)
+  calc(clamp(26px,3vw,34px) + env(safe-area-inset-bottom));font-size:.88rem}
+.foot{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:clamp(24px,3vw,40px)}
+.foot h3{font-size:.85rem;font-weight:590;color:var(--txt);margin-bottom:13px;letter-spacing:-.01em}
+.foot ul{list-style:none;display:flex;flex-direction:column;gap:2px}
+.foot ul a{color:var(--txt-2);display:inline-block;padding-block:11px;transition:color .2s}
+/* Почта в подвале — такая же область нажатия, как у остальных ссылок */
+.foot p a{display:inline-block;padding-block:10px}
+.foot ul a:hover{color:var(--txt)}
+.foot p{color:var(--txt-2);margin-bottom:8px;line-height:1.5}
 .foot .brand{margin-bottom:14px}
-.copy-line{margin-top:clamp(30px,4vw,42px);padding-top:24px;border-top:1px solid var(--line);
-  text-align:center;color:var(--txt3);font-size:.81rem;font-family:var(--mono)}
+.copy-line{margin-top:clamp(28px,4vw,42px);padding-top:22px;border-top:.5px solid var(--sep);
+  color:var(--txt-3);font-size:.82rem;display:flex;gap:8px 18px;flex-wrap:wrap;justify-content:space-between}
 
-/* ─────────────────────────── окно документа ─────────────────────────── */
-.modal{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;
-  padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));
-  background:rgba(3,4,7,.84);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
-  opacity:0;transition:opacity .28s}
+/* ── Модальное окно документа ── */
+.modal{position:fixed;inset:0;z-index:300;display:none;align-items:flex-end;justify-content:center;
+  background:rgba(0,0,0,.6);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  opacity:0;transition:opacity .3s}
 .modal.show{display:flex;opacity:1}
-.modal-in{background:rgba(14,16,24,.9);-webkit-backdrop-filter:blur(30px) saturate(1.8);
-  backdrop-filter:blur(30px) saturate(1.8);border:1px solid var(--edge);border-radius:var(--r-xl);
-  max-width:860px;width:100%;max-height:min(86dvh,900px);overflow-y:auto;overscroll-behavior:contain;
-  padding:clamp(24px,3.4vw,38px);position:relative;transform:translateY(14px) scale(.99);
-  transition:transform .32s cubic-bezier(.2,.7,.3,1);box-shadow:var(--shadow)}
+.modal-in{background:var(--card);border-radius:var(--r-xl) var(--r-xl) 0 0;width:100%;max-width:760px;
+  max-height:min(88dvh,940px);overflow-y:auto;overscroll-behavior:contain;
+  padding:12px clamp(20px,3vw,34px) calc(clamp(24px,3vw,34px) + env(safe-area-inset-bottom));
+  position:relative;transform:translateY(100%);transition:transform .38s cubic-bezier(.2,.8,.25,1)}
 .modal.show .modal-in{transform:none}
-.modal-in h3{font-size:clamp(1.22rem,2.4vw,1.45rem);margin-bottom:18px;padding-right:52px}
-.modal-in .body{white-space:pre-line;color:var(--txt2);font-size:clamp(.89rem,.25vw + .85rem,.94rem);line-height:1.75}
-.x-modal{position:absolute;top:16px;right:16px;width:42px;height:42px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);
-  border:1px solid var(--line);color:var(--txt);font-size:1.3rem;cursor:pointer;transition:.2s}
-.x-modal:hover{background:var(--acc);color:var(--on-acc)}
+/* Полоска-«ручка» вверху — привычный признак шторки в iOS */
+.modal-in::before{content:"";display:block;width:38px;height:5px;border-radius:99px;
+  background:var(--card-3);margin:0 auto 18px;position:sticky;top:0}
+.modal-in h3{font-size:clamp(1.3rem,2.4vw,1.6rem);margin-bottom:16px;padding-right:46px}
+.modal-in .body{white-space:pre-line;color:var(--txt-2);font-size:.94rem;line-height:1.62}
+.x-modal{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;
+  background:var(--card-3);color:var(--txt-2);display:flex;align-items:center;justify-content:center;
+  font-size:1.2rem;cursor:pointer;transition:background-color .2s}
+.x-modal:hover{background:#48484A;color:var(--txt)}
 
-/* ─────────────────────── мелкие плавающие элементы ─────────────────────── */
-.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));
-  transform:translateX(-50%) translateY(16px);background:var(--acc);color:var(--on-acc);
-  padding:13px 26px;border-radius:var(--pill);font-weight:650;font-size:.92rem;z-index:400;
-  opacity:0;pointer-events:none;transition:opacity .28s,transform .28s;max-width:calc(100vw - 32px);text-align:center}
+/* ── Всплывающее уведомление и кнопка «наверх» ── */
+.toast{position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(14px);background:var(--card-3);color:var(--txt);
+  padding:13px 24px;border-radius:var(--pill);font-size:.93rem;font-weight:510;z-index:400;
+  opacity:0;pointer-events:none;transition:opacity .28s,transform .28s;
+  max-width:calc(100vw - 32px);text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6)}
 .toast.show{opacity:1;transform:translateX(-50%)}
-.up{position:fixed;right:max(20px,env(safe-area-inset-right));
-  bottom:calc(20px + env(safe-area-inset-bottom));width:48px;height:48px;border-radius:50%;
+.up{position:fixed;right:max(18px,env(safe-area-inset-right));
+  bottom:calc(18px + env(safe-area-inset-bottom));width:44px;height:44px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:80;
-  background:rgba(255,255,255,.07);border:1px solid var(--edge);color:var(--txt);
-  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
-  opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s,color .2s,border-color .2s}
+  background:rgba(44,44,46,.82);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  color:var(--txt);opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}
 .up.show{opacity:1;visibility:visible}
-.up:hover{border-color:rgba(0,229,192,.45);color:var(--acc)}
 
-/* ═══════════════ появление блоков ═══════════════
-   ГЛАВНОЕ ПРАВИЛО ЭТОГО ФАЙЛА: ни один блок страницы не имеет
-   opacity:0 в обычном состоянии. Однажды сайт уже уходил в чёрный
-   экран, потому что показ контента зависел от того, отработает ли
-   что-то асинхронное (сначала — скрипт, потом — анимация по прокрутке).
-   Больше такой зависимости нет: всё содержимое видно сразу и всегда.
-
-   Оживает страница другим: подсветка фона, сетка узлов, лента сервисов,
-   полоса прочитанного, отклик карточек и кнопок на курсор. Единственная
-   анимация появления — на первом экране, и она привязана ко времени,
-   то есть гарантированно доигрывает до конца. */
-@keyframes heroIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
-
+/* ═══ Появление первого экрана ═══
+   Только здесь и только по времени: такая анимация гарантированно
+   доигрывает до конца, в отличие от привязки к прокрутке. */
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:no-preference){
-  .hero > *{animation:heroIn .68s cubic-bezier(.2,.7,.3,1) backwards}
-  .hero > :nth-child(2){animation-delay:.06s}
-  .hero > :nth-child(3){animation-delay:.12s}
-  .hero > :nth-child(4){animation-delay:.18s}
-  .hero > :nth-child(5){animation-delay:.24s}
-  .hero > :nth-child(6){animation-delay:.3s}
+  .hero > *,.device-wrap{animation:rise .7s cubic-bezier(.2,.7,.3,1) backwards}
+  .hero > :nth-child(2){animation-delay:.05s}
+  .hero > :nth-child(3){animation-delay:.1s}
+  .hero > :nth-child(4){animation-delay:.15s}
+  .device-wrap{animation-delay:.2s}
 }
 
-@media print{
-  .hero > *{animation:none!important;opacity:1!important;transform:none!important}
-  .aura,.grain,.vign,#net,.progress,.up,header.nav{display:none!important}
-  body{background:#fff;color:#000}
-  .card,.plan,.route,.os,.status,.post,.rev-card,.doc,.trial,.final,.faq details{
-    background:none!important;border:1px solid #ccc!important;box-shadow:none!important}
-}
-@media (forced-colors:active){
-  .hero > *{animation:none!important;opacity:1!important;transform:none!important}
-}
-
-/* ═══════════════ размер областей нажатия ═══════════════
-   На телефоне палец попадает примерно в 44 px. Меньше — промахи,
-   поэтому у всех ссылок и кнопок высота доведена до этой величины. */
-.lang button{min-height:42px}
-.nav-l a{min-height:40px;display:inline-flex;align-items:center}
-.brand{padding-block:7px}
-.mob a:not(.btn){padding:10px 18px;border-radius:var(--pill)}
-.mob a:not(.btn):hover{background:rgba(255,255,255,.06)}
-.apps a{min-height:44px;display:inline-flex;align-items:center}
-.foot ul{gap:2px}
-.foot ul a{display:inline-block;padding-block:11px}
-.foot .tg{display:inline-block;padding-block:11px}
-.srv{min-height:56px}
-
-/* ═══════════════ адаптивность ═══════════════ */
-
-/* очень широкие экраны — даём воздуху развернуться */
-@media (min-width:1720px){
-  :root{--maxw:1360px}
-  body{font-size:17.5px}
-}
-
-/* планшеты в альбоме: меню целиком не помещается */
-@media (max-width:1080px){
-  .nav-l a{padding:9px 11px;font-size:.86rem}
-}
+/* ═══ Адаптивность ═══ */
+@media (min-width:1600px){ :root{--maxw:1180px} }
 @media (max-width:900px){
   .nav-l{display:none}
   .burger{display:flex}
-  .nav-r .btn{padding:12px 20px;min-height:46px}
 }
-
-/* телефоны */
 @media (max-width:560px){
-  :root{--r-xl:26px;--r:22px}
+  :root{--r-lg:22px;--r-xl:26px}
   .nav-r .btn{display:none}
-  .brand{font-size:1rem}
-  .hero h1{max-width:100%}
-  .cta{gap:10px}
   .cta .btn{width:100%}
-  .route-row{gap:9px}
-  /* стрелки разворачиваем вниз — цепочка читается сверху вниз */
+  .path{flex-direction:column;align-items:stretch;text-align:center}
   .arrow{transform:rotate(90deg);width:100%;text-align:center;line-height:1}
-  .route-row{flex-direction:column;align-items:stretch;text-align:center}
-  .field{padding:12px;flex-direction:column;align-items:stretch;gap:10px}
+  .row{padding:14px 16px}
+  .row + .row::before{left:58px}
+  .field{flex-direction:column;align-items:stretch}
   .field .copy{align-self:flex-end}
-  .foot{grid-template-columns:1fr;text-align:center}
-  .foot ul{align-items:center}
-  .foot .brand{justify-content:center}
-  .srv{font-size:.9rem}
+  .copy-line{justify-content:center;text-align:center}
 }
-
-/* очень узкие экраны (320–380 px) */
 @media (max-width:380px){
-  :root{--pad:15px}
-  .tag{font-size:.64rem;padding:6px 12px}
-  .apps a{width:100%;text-align:center}
+  :root{--pad:14px}
+  .apps a{width:100%;justify-content:center}
 }
-
-/* телефон в альбомной ориентации — экономим высоту */
 @media (max-height:520px) and (orientation:landscape){
-  .hero{padding-top:calc(var(--nav-h) + 26px);padding-bottom:34px}
-  .mob{gap:10px;justify-content:flex-start}
-  .mob a:not(.btn){font-size:1.05rem}
+  .hero{padding-top:calc(var(--nav-h) + 28px)}
+  .device{display:none}
 }
 
-/* уважение к системным настройкам */
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
     transition-duration:.001ms!important}
-  .aura i{animation:none}
-  .marq-row{animation:none}
 }
 @media (prefers-contrast:more){
-  :root{--txt2:#C6CEDC;--txt3:#AEB6C6;--line:rgba(255,255,255,.16);--edge:rgba(255,255,255,.28)}
+  :root{--txt-2:rgba(235,235,245,.85);--txt-3:rgba(235,235,245,.75);--sep:rgba(160,160,168,.8)}
+}
+@media print{
+  .hero > *,.device-wrap{animation:none!important;opacity:1!important;transform:none!important}
+  header.nav,.up,.device-wrap,.modal,.toast{display:none!important}
+  body{background:#fff;color:#000}
+  .group,.tile,.plan,.os,.faq,.route,.trial,.final{background:none!important;border:1px solid #ccc!important}
 }
 </style>
 </head>
 <body>
-<!-- Фон: мягкие световые пятна + сетка узлов + зерно.
-     Всё декоративное, скрыто от программ чтения с экрана. -->
-<div class="aura" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
-<canvas id="net" aria-hidden="true"></canvas>
-<div class="vign" aria-hidden="true"></div>
-<div class="grain" aria-hidden="true"></div>
-<div class="progress" aria-hidden="true"></div>
 
 <header class="nav" id="nav">
   <div class="nav-in">
     <a href="#" class="brand">
-      <svg class="m" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="26" fill="url(#g)"/><path d="M54 20 30 56h16l-4 24 26-38H50z" fill="#06070B"/><defs><linearGradient id="g" x1="0" y1="0" x2="100" y2="100"><stop stop-color="#00E5C0"/><stop offset="1" stop-color="#4D8DFF"/></linearGradient></defs></svg>
+      <img src="/logo.svg" width="28" height="28" alt="" aria-hidden="true">
       Gigabyte
     </a>
     <nav class="nav-l">
@@ -752,7 +573,7 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
       <a href="#faq" data-i="n6">Вопросы</a>
     </nav>
     <div class="nav-r">
-      <div class="lang"><button data-lang="ru" class="on">RU</button><button data-lang="en">EN</button></div>
+      <div class="seg lang"><button data-lang="ru" class="on">RU</button><button data-lang="en">EN</button></div>
       <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-main" data-i="cta">Подключить</a>
       <button class="burger" id="burger" aria-label="Меню"><span></span><span></span><span></span></button>
     </div>
@@ -771,66 +592,79 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
 </div>
 
 <main>
-  <!-- HERO -->
+  <!-- ПЕРВЫЙ ЭКРАН -->
   <section class="hero wrap">
-    <span class="tag rev"><span class="dot"></span><span data-i="tag">Сеть работает · Москва → Париж</span></span>
-    <h1 class="rev" data-ih="h1">Интернет без границ.<br><span class="grad">Без компромиссов</span> по скорости.</h1>
-    <p class="lead rev" data-i="lead">Gigabyte VPN открывает всё, что заблокировано, и не ломает то, что работает. Зарубежные сервисы идут через европейский узел, российские банки и Госуслуги — напрямую. Переключать ничего не нужно.</p>
-    <div class="cta rev">
+    <span class="eyebrow" data-i="tag">Gigabyte VPN</span>
+    <h1 data-ih="h1">Весь интернет.<br><span class="grad">Как дома.</span></h1>
+    <p class="lead" data-i="lead">Открывает то, что закрыто, и не ломает то, что работает. Банки и Госуслуги остаются на месте — переключать ничего не нужно.</p>
+    <div class="cta">
       <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-main" data-i="cta1">Подключить за 2 минуты</a>
       <a href="#trial" class="btn b-ghost" data-i="cta2">Попробовать бесплатно</a>
     </div>
-    <div class="hero-note rev"><span class="live"><span class="dot"></span><span data-i="note">аптайм 99.9% · оплата картой РФ, криптой или Telegram Stars</span></span></div>
-
-    <div class="kpi rev">
-      <div><b data-count="1">1 Гбит/с</b><span data-i="k1">пиковая скорость канала</span></div>
-      <div><b data-count="2">&lt;20 мс</b><span data-i="k2">задержка до входного узла</span></div>
-      <div><b data-count="3">0</b><span data-i="k3">записей о вашем трафике</span></div>
-      <div><b data-count="4">24/7</b><span data-i="k4">поддержка живым человеком</span></div>
-    </div>
+    <p class="hero-note" data-i="note">от 142 ₽ в месяц · оплата картой РФ или криптовалютой · без KYC</p>
   </section>
 
-  <!-- ЛЕНТА СЕРВИСОВ. Набор продублирован, чтобы прокрутка была бесшовной;
-       текст лежит в разметке — блок не «прыгает» и индексируется поисковиками. -->
-  <div class="marq" aria-label="Сервисы, которые работают через VPN">
-    <div class="marq-row" id="marq"><span class="chip">YouTube</span><span class="chip">Instagram</span><span class="chip">ChatGPT</span><span class="chip">Discord</span><span class="chip">Netflix</span><span class="chip">Spotify</span><span class="chip">Twitch</span><span class="chip">Facebook</span><span class="chip">X (Twitter)</span><span class="chip">Telegram</span><span class="chip">WhatsApp</span><span class="chip">Reddit</span><span class="chip">TikTok</span><span class="chip">LinkedIn</span><span class="chip">Steam</span><span class="chip">Claude</span><span class="chip">Midjourney</span><span class="chip">Notion</span><span class="chip">Figma</span><span class="chip">GitHub</span><span class="chip">Pinterest</span><span class="chip">Zoom</span><span class="chip">YouTube</span><span class="chip">Instagram</span><span class="chip">ChatGPT</span><span class="chip">Discord</span><span class="chip">Netflix</span><span class="chip">Spotify</span><span class="chip">Twitch</span><span class="chip">Facebook</span><span class="chip">X (Twitter)</span><span class="chip">Telegram</span><span class="chip">WhatsApp</span><span class="chip">Reddit</span><span class="chip">TikTok</span><span class="chip">LinkedIn</span><span class="chip">Steam</span><span class="chip">Claude</span><span class="chip">Midjourney</span><span class="chip">Notion</span><span class="chip">Figma</span><span class="chip">GitHub</span><span class="chip">Pinterest</span><span class="chip">Zoom</span></div>
+  <!-- МАКЕТ УСТРОЙСТВА -->
+  <div class="device-wrap">
+    <div class="device" aria-hidden="true">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="s-hero">
+          <div class="big">4 мес 12 дней</div>
+          <div class="sm">Защита активна · Париж</div>
+        </div>
+        <div class="s-row">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z"/></svg></span>
+          <span class="s-col"><span class="s-line m"></span><span class="s-line s"></span></span>
+          <span class="s-dot"></span>
+        </div>
+        <div class="s-row">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span>
+          <span class="s-col"><span class="s-line m"></span><span class="s-line s"></span></span>
+        </div>
+        <div class="s-row">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span>
+          <span class="s-col"><span class="s-line m"></span><span class="s-line s"></span></span>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- ПОЧЕМУ -->
+  <!-- ВОЗМОЖНОСТИ -->
   <section id="why" class="wrap">
-    <div class="sec-head rev">
-      <span class="tag" data-i="s1tag">Универсальность</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s1tag">Универсальность</span>
       <h2 data-ih="s1h">Один ключ — <span class="grad">любая задача</span></h2>
-      <p class="lead" data-i="s1p">Не нужно держать два сервиса: один для соцсетей, другой для работы. Gigabyte закрывает весь спектр — от видео в 4K до банковских приложений и рабочих созвонов.</p>
+      <p class="lead" data-i="s1p">Не нужно держать два сервиса: один для соцсетей, другой для работы. Gigabyte закрывает весь спектр — от видео в 4K до банковских приложений.</p>
     </div>
-    <div class="grid g3">
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z"/></svg></div><h3 data-i="c1h">Невидимый для фильтров</h3><p data-i="c1p">Протокол VLESS Reality выдаёт ваш трафик за обычный визит на крупный сайт. Оборудование DPI и ТСПУ видит рядовое HTTPS-соединение и пропускает его.</p><span class="mono">VLESS · XTLS Vision · Reality</span></div>
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div><h3 data-i="c2h">Скорость без потерь</h3><p data-i="c2p">XTLS Vision убирает двойное шифрование внутри туннеля. YouTube в 4K, торренты-заменители, загрузки и игры идут на полной скорости канала.</p><span class="mono">до 1 Гбит/с</span></div>
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/><circle cx="12" cy="12" r="9"/></svg></div><h3 data-i="c3h">Российские сервисы живые</h3><p data-i="c3p">Банки, Госуслуги, маркетплейсы и такси открываются с российского адреса напрямую. Не нужно выключать VPN, чтобы оплатить счёт.</p><span class="mono">split-routing</span></div>
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M12 18h.01"/></svg></div><h3 data-i="c4h">Все устройства сразу</h3><p data-i="c4p">iPhone, Android, Windows, macOS — одна ссылка-подписка на всё. Конфигурация обновляется сама, вручную ничего вводить не нужно.</p><span class="mono">iOS · Android · Windows · macOS</span></div>
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div><h3 data-i="c5h">Мы не ведём журналы</h3><p data-i="c5p">Ни IP, ни истории, ни DNS-запросов, ни содержимого. Журнал доступа отключён на уровне сервера — восстановить вашу активность технически не из чего.</p><span class="mono">access log → /dev/null</span></div>
-      <div class="card rev"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg></div><h3 data-i="c6h">Оплата без барьеров</h3><p data-i="c6p">Telegram Stars проходят картой любого российского банка. Нужна полная анонимность — платите USDT или USDC. Паспорт и KYC не спросим.</p><span class="mono">Stars · USDT · USDC</span></div>
+    <div class="tiles">
+      <div class="tile"><div class="ic i-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z"/></svg></div><h3 data-i="c1h">Невидимый для фильтров</h3><p data-i="c1p">Протокол VLESS Reality выдаёт ваш трафик за обычный визит на крупный сайт. Оборудование DPI и ТСПУ видит рядовое HTTPS-соединение и пропускает его.</p><span class="note">VLESS · XTLS Vision · Reality</span></div>
+      <div class="tile"><div class="ic i-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div><h3 data-i="c2h">Скорость без потерь</h3><p data-i="c2p">XTLS Vision убирает двойное шифрование внутри туннеля. Видео в 4K, загрузки и игры идут на полной скорости канала.</p><span class="note">до 1 Гбит/с</span></div>
+      <div class="tile"><div class="ic i-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></div><h3 data-i="c3h">Российские сервисы живые</h3><p data-i="c3p">Банки, Госуслуги, маркетплейсы и такси открываются с российского адреса напрямую. Не нужно выключать VPN, чтобы оплатить счёт.</p><span class="note">раздельная маршрутизация</span></div>
+      <div class="tile"><div class="ic i-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M12 18h.01"/></svg></div><h3 data-i="c4h">Все устройства сразу</h3><p data-i="c4p">iPhone, Android, Windows, macOS — одна ссылка-подписка на всё. Конфигурация обновляется сама, вручную ничего вводить не нужно.</p><span class="note">iOS · Android · Windows · macOS</span></div>
+      <div class="tile"><div class="ic i-gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div><h3 data-i="c5h">Мы не ведём журналы</h3><p data-i="c5p">Ни IP, ни истории, ни DNS-запросов, ни содержимого. Журнал доступа отключён на уровне сервера — восстановить вашу активность технически не из чего.</p><span class="note">access log → /dev/null</span></div>
+      <div class="tile"><div class="ic i-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/></svg></div><h3 data-i="c6h">Оплата без барьеров</h3><p data-i="c6p">Telegram Stars проходят картой любого российского банка. Нужна полная анонимность — платите USDT или USDC. Паспорт и KYC не спросим.</p><span class="note">Stars · USDT · USDC</span></div>
     </div>
   </section>
 
-  <!-- МАРШРУТИЗАЦИЯ -->
+  <!-- ТЕХНОЛОГИЯ -->
   <section id="routing" class="wrap">
-    <div class="sec-head rev">
-      <span class="tag" data-i="s2tag">Как это устроено</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s2tag">Как это устроено</span>
       <h2 data-ih="s2h">Умный маршрут <span class="grad">под каждый запрос</span></h2>
       <p class="lead" data-i="s2p">Обычный VPN гонит весь трафик в одну страну — и банк блокирует вход, потому что вы «зашли из Франции». Мы разделяем поток на входном узле в Москве.</p>
     </div>
-    <div class="route rev">
-      <div class="route-row">
+    <div class="route">
+      <div class="path">
         <span class="node" data-i="r1">Ваше устройство</span><span class="arrow">→</span>
         <span class="node hi" data-i="r2">Вход · Москва</span><span class="arrow">→</span>
         <span class="node" data-i="r3">Выход · Париж</span><span class="arrow">→</span>
         <span class="node" data-i="r4">YouTube, ChatGPT, Instagram</span>
       </div>
-      <div class="route-row">
+      <div class="path">
         <span class="node" data-i="r1b">Ваше устройство</span><span class="arrow">→</span>
         <span class="node hi" data-i="r2b">Вход · Москва</span><span class="arrow">→</span>
-        <span class="node" data-i="r5">Сбербанк, Госуслуги, Ozon</span>
+        <span class="node ru" data-i="r5">Сбербанк, Госуслуги, Ozon</span>
       </div>
       <p data-i="r6">Решение принимается за миллисекунды по домену и адресу. Российские сервисы видят российский IP и работают штатно, зарубежные — европейский. Одна подписка, ноль переключений.</p>
     </div>
@@ -838,13 +672,14 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
 
   <!-- ТАРИФЫ -->
   <section id="pricing" class="wrap">
-    <div class="sec-head rev">
-      <span class="tag" data-i="s3tag">Тарифы</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s3tag">Тарифы</span>
       <h2 data-ih="s3h">Честная цена <span class="grad">без звёздочек</span></h2>
       <p class="lead" data-i="s3p">Безлимитный трафик на любом тарифе. Никаких доплат за скорость, устройства или локации.</p>
     </div>
     <div class="plans">
-      <div class="plan rev"><span class="lbl" data-i="p1">1 месяц</span><div class="amt">200 ₽</div><div class="per" data-i="p1s">попробовать</div>
+      <div class="plan">
+        <div class="per" data-i="p1">1 месяц</div><div class="amt">200 ₽</div><div class="mo" data-i="p1s">попробовать</div>
         <ul>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f1">Безлимитный трафик</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f2">Все локации</span></li>
@@ -852,7 +687,9 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
         </ul>
         <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-ghost" data-i="choose">Выбрать</a>
       </div>
-      <div class="plan best rev"><span class="best-tag" data-i="best">Выбирают чаще</span><span class="lbl" data-i="p2">3 месяца</span><div class="amt">500 ₽</div><div class="per">167 ₽/<span data-i="mo">мес</span></div>
+      <div class="plan best">
+        <span class="tag" data-i="best">Выбирают</span>
+        <div class="per" data-i="p2">3 месяца</div><div class="amt">500 ₽</div><div class="mo">167 ₽/<span data-i="mo">мес</span></div>
         <ul>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f4">Всё из тарифа на месяц</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f5">Приоритетная поддержка</span></li>
@@ -860,7 +697,8 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
         </ul>
         <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-main" data-i="choose">Выбрать</a>
       </div>
-      <div class="plan rev"><span class="lbl" data-i="p3">6 месяцев</span><div class="amt">900 ₽</div><div class="per">150 ₽/<span data-i="mo">мес</span></div>
+      <div class="plan">
+        <div class="per" data-i="p3">6 месяцев</div><div class="amt">900 ₽</div><div class="mo">150 ₽/<span data-i="mo">мес</span></div>
         <ul>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f7">Всё из тарифа на 3 месяца</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f8">Промокоды для друзей</span></li>
@@ -868,7 +706,8 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
         </ul>
         <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-ghost" data-i="choose">Выбрать</a>
       </div>
-      <div class="plan rev"><span class="lbl" data-i="p4">12 месяцев</span><div class="amt">1700 ₽</div><div class="per">142 ₽/<span data-i="mo">мес</span></div>
+      <div class="plan">
+        <div class="per" data-i="p4">12 месяцев</div><div class="amt">1700 ₽</div><div class="mo">142 ₽/<span data-i="mo">мес</span></div>
         <ul>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f10">Лучшая цена за месяц</span></li>
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg><span data-i="f11">Все будущие локации</span></li>
@@ -882,24 +721,24 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
 
   <!-- ПРОБНЫЙ ДОСТУП -->
   <section id="trial" class="wrap">
-    <div class="trial rev">
+    <div class="trial">
       <div class="trial-grid">
         <div>
-          <span class="tag" data-i="s4tag">Бесплатно</span>
+          <span class="eyebrow" data-i="s4tag">Бесплатно</span>
           <h2 data-ih="s4h">Telegram не открывается?<br><span class="grad">Начните отсюда</span></h2>
           <p class="lead" data-i="s4p">Если провайдер режет Telegram, вы не сможете дойти до бота. Возьмите бесплатный пробный ключ прямо здесь: он откроет доступ, а дальше оформите постоянную подписку.</p>
           <div class="steps">
             <div class="step"><b>1</b><p data-i="t1">Установите приложение: v2rayNG для Android и Windows, Streisand для iPhone и Mac.</p></div>
-            <div class="step"><b>2</b><p data-i="t2">Скопируйте ключ справа и добавьте его в приложение через «импорт из буфера обмена».</p></div>
+            <div class="step"><b>2</b><p data-i="t2">Скопируйте ключ и добавьте его в приложение через «импорт из буфера обмена».</p></div>
             <div class="step"><b>3</b><p data-i="t3">Включите соединение — Telegram и остальной интернет откроются.</p></div>
             <div class="step"><b>4</b><p data-i="t4">Оформите подписку в боте: личный ключ быстрее и без ограничений.</p></div>
           </div>
         </div>
         <div>
           <div class="key-lbl" data-i="t5">Пробный ключ доступа</div>
-          <div class="field">
-            <code id="trial-link">https://vpn.gigabytebot.com:2096/jdjdjdjjdkdlpwoeieudhbxnxksi/9045ad20ed3495d0</code>
-            <button class="copy" id="copy-trial" aria-label="Скопировать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          <div class="field" id="copy-trial">
+            <code id="trial-link" data-full="https://vpn.gigabytebot.com:2096/jdjdjdjjdkdlpwoeieudhbxnxksi/9045ad20ed3495d0">https://vpn.gigabytebot.com</code>
+            <button class="copy" aria-label="Скопировать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
           </div>
           <div class="apps">
             <a href="https://apps.apple.com/app/streisand/id6450534064" target="_blank" rel="noopener">Streisand · iOS / macOS</a>
@@ -913,13 +752,13 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
 
   <!-- УСТАНОВКА -->
   <section id="setup" class="wrap">
-    <div class="sec-head rev">
-      <span class="tag" data-i="s5tag">Установка</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s5tag">Установка</span>
       <h2 data-ih="s5h">Три шага — и вы <span class="grad">в сети</span></h2>
       <p class="lead" data-i="s5p">Мы не заставляем ставить свой закрытый клиент. Подойдут открытые приложения, код которых может проверить любой специалист.</p>
     </div>
-    <div class="grid g2">
-      <div class="os rev">
+    <div class="os-grid">
+      <div class="os">
         <h3>iPhone · iPad · Mac</h3>
         <div class="rec" data-i="rec1">приложение Streisand</div>
         <ol>
@@ -929,7 +768,7 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
           <li data-i="i4">Переведите тумблер — при первом запуске разрешите добавить VPN-профиль.</li>
         </ol>
       </div>
-      <div class="os rev">
+      <div class="os">
         <h3>Android · Windows</h3>
         <div class="rec" data-i="rec2">приложение v2rayNG</div>
         <ol>
@@ -942,66 +781,74 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
     </div>
   </section>
 
-  <!-- СТАТУС -->
+  <!-- СОСТОЯНИЕ СЕТИ -->
   <section class="wrap">
-    <div class="sec-head mid rev">
-      <span class="tag" data-i="s6tag">Состояние сети</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s6tag">Состояние сети</span>
       <h2 data-ih="s6h">Всё <span class="grad">под контролем</span></h2>
     </div>
-    <div class="status rev">
-      <div class="srv"><span>🇷🇺 <span data-i="n_ru">Москва — входной узел</span></span><span class="ok"><span class="dot"></span> online</span></div>
-      <div class="srv"><span>🇫🇷 <span data-i="n_fr">Париж — выходной узел</span></span><span class="ok"><span class="dot"></span> online</span></div>
-      <div class="srv"><span>🇳🇱 <span data-i="n_nl">Амстердам</span></span><span class="soon" data-i="soon">скоро</span></div>
-      <div class="srv"><span>🇩🇪 <span data-i="n_de">Франкфурт</span></span><span class="soon" data-i="soon">скоро</span></div>
+    <div style="max-width:640px;margin-inline:auto">
+      <div class="group-title" data-i="s6grp">Узлы</div>
+      <div class="group">
+        <div class="row"><span class="ic i-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></span><span class="tx"><b data-i="n_ru">Москва — входной узел</b><span data-i="n_ru_s">Раздельная маршрутизация</span></span><span class="val" style="color:var(--green)">online</span></div>
+        <div class="row"><span class="ic i-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg></span><span class="tx"><b data-i="n_fr">Париж — выходной узел</b><span data-i="n_fr_s">Зарубежный трафик</span></span><span class="val" style="color:var(--green)">online</span></div>
+        <div class="row"><span class="ic i-gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></span><span class="tx"><b data-i="n_nl">Амстердам</b></span><span class="val" data-i="soon">скоро</span></div>
+        <div class="row"><span class="ic i-gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></span><span class="tx"><b data-i="n_de">Франкфурт</b></span><span class="val" data-i="soon">скоро</span></div>
+      </div>
     </div>
   </section>
 
-  <!-- НОВОСТИ -->
+  <!-- ЖУРНАЛ -->
   <section id="news" class="wrap">
-    <div class="sec-head rev">
-      <span class="tag" data-i="s7tag">Журнал</span>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s7tag">Журнал</span>
       <h2 data-ih="s7h">Что мы <span class="grad">улучшили</span></h2>
     </div>
-    <div class="grid g3">
-      <article class="post rev"><time datetime="2026-07-25">25.07.2026</time><h3 data-i="nw1h">Банки и Госуслуги стали быстрее</h3><p data-i="nw1p">Расширили список российских сервисов, которые идут напрямую: 90+ доменов банков, госпорталов, маркетплейсов и операторов связи. Ответ стал быстрее в разы.</p></article>
-      <article class="post rev"><time datetime="2026-07-21">21.07.2026</time><h3 data-i="nw2h">Новый входной узел в Москве</h3><p data-i="nw2p">Перенесли вход на инфраструктуру внутри страны: задержка упала, соединение стало стабильнее, обход ТСПУ — надёжнее.</p></article>
-      <article class="post rev"><time datetime="2026-07-18">18.07.2026</time><h3 data-i="nw3h">Приглашайте друзей — получайте месяцы</h3><p data-i="nw3p">Реферальная программа: трое друзей с оплаченной подпиской дают вам месяц VPN бесплатно. Всё считается автоматически в приложении.</p></article>
+    <div class="tiles">
+      <article class="tile"><div class="ic i-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M20 6 9 17l-5-5"/></svg></div><h3 data-i="nw1h">Банки и Госуслуги стали быстрее</h3><p data-i="nw1p">Расширили список российских сервисов, которые идут напрямую: 90+ доменов банков, госпорталов, маркетплейсов и операторов связи.</p><span class="note">25.07.2026</span></article>
+      <article class="tile"><div class="ic i-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></div><h3 data-i="nw2h">Новый входной узел в Москве</h3><p data-i="nw2p">Перенесли вход на инфраструктуру внутри страны: задержка упала, соединение стало стабильнее, обход ТСПУ — надёжнее.</p><span class="note">21.07.2026</span></article>
+      <article class="tile"><div class="ic i-pink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg></div><h3 data-i="nw3h">Приглашайте друзей — получайте месяцы</h3><p data-i="nw3p">Реферальная программа: трое друзей с оплаченной подпиской дают вам месяц VPN бесплатно. Всё считается автоматически в приложении.</p><span class="note">18.07.2026</span></article>
     </div>
   </section>
 
   <!-- ОТЗЫВЫ (заполняется автоматически из реальных оценок пользователей) -->
   <!-- REVIEWS:START --><!-- REVIEWS:END -->
 
-  <!-- FAQ -->
+  <!-- ВОПРОСЫ -->
   <section id="faq" class="wrap">
-    <div class="sec-head mid rev">
-      <span class="tag">FAQ</span>
+    <div class="sec-head">
+      <span class="eyebrow">FAQ</span>
       <h2 data-ih="s8h">Отвечаем <span class="grad">честно</span></h2>
     </div>
     <div class="faq">
-      <details class="rev"><summary data-i="q1">Какой VPN реально работает в России в 2026 году?</summary><p data-i="a1">Те, что маскируют трафик. Классические протоколы вроде OpenVPN и WireGuard определяются оборудованием провайдера по характерным признакам и блокируются. Gigabyte работает на VLESS Reality: соединение выглядит как обычное обращение к большому сайту, поэтому фильтры пропускают его.</p></details>
-      <details class="rev"><summary data-i="q2">Банк перестанет пускать в приложение?</summary><p data-i="a2">Нет. Российские сервисы мы отправляем напрямую с российского адреса — банк видит обычное подключение из страны. Отключать VPN ради оплаты или Госуслуг не требуется.</p></details>
-      <details class="rev"><summary data-i="q3">Насколько падает скорость?</summary><p data-i="a3">Практически не падает. Технология XTLS Vision не шифрует данные повторно внутри уже защищённого канала, поэтому остаётся скорость вашего провайдера — вплоть до 1 Гбит/с.</p></details>
-      <details class="rev"><summary data-i="q4">Вы правда не храните логи?</summary><p data-i="a4">Да. Журнал доступа отключён на уровне сервера, DNS-запросы и содержимое трафика нигде не записываются. Даже при желании выдать историю посещений нам нечего — она не создаётся.</p></details>
-      <details class="rev"><summary data-i="q5">Как оплатить, если карта не работает за рубежом?</summary><p data-i="a5">Через Telegram Stars: они покупаются картой любого российского банка прямо в Telegram. Второй вариант — криптовалюта USDT или USDC, если нужна полная анонимность.</p></details>
-      <details class="rev"><summary data-i="q6">Сколько устройств можно подключить?</summary><p data-i="a6">Одной подпиской пользуются несколько устройств одновременно: телефон, ноутбук, планшет. Ссылка-подписка сама раздаёт актуальную конфигурацию на каждое.</p></details>
-      <details class="rev"><summary data-i="q7">Что если VPN перестанет работать?</summary><p data-i="a7">Напишите в поддержку прямо в боте — отвечает человек, а не робот. Мы следим за состоянием узлов круглосуточно и меняем параметры маскировки раньше, чем вы заметите проблему.</p></details>
+      <details><summary data-i="q1">Какой VPN реально работает в России в 2026 году?</summary><p data-i="a1">Те, что маскируют трафик. Классические протоколы вроде OpenVPN и WireGuard определяются оборудованием провайдера по характерным признакам и блокируются. Gigabyte работает на VLESS Reality: соединение выглядит как обычное обращение к большому сайту, поэтому фильтры пропускают его.</p></details>
+      <details><summary data-i="q2">Банк перестанет пускать в приложение?</summary><p data-i="a2">Нет. Российские сервисы мы отправляем напрямую с российского адреса — банк видит обычное подключение из страны. Отключать VPN ради оплаты или Госуслуг не требуется.</p></details>
+      <details><summary data-i="q3">Насколько падает скорость?</summary><p data-i="a3">Практически не падает. Технология XTLS Vision не шифрует данные повторно внутри уже защищённого канала, поэтому остаётся скорость вашего провайдера — вплоть до 1 Гбит/с.</p></details>
+      <details><summary data-i="q4">Вы правда не храните логи?</summary><p data-i="a4">Да. Журнал доступа отключён на уровне сервера, DNS-запросы и содержимое трафика нигде не записываются. Даже при желании выдать историю посещений нам нечего — она не создаётся.</p></details>
+      <details><summary data-i="q5">Как оплатить, если карта не работает за рубежом?</summary><p data-i="a5">Через Telegram Stars: они покупаются картой любого российского банка прямо в Telegram. Второй вариант — криптовалюта USDT или USDC, если нужна полная анонимность.</p></details>
+      <details><summary data-i="q6">Сколько устройств можно подключить?</summary><p data-i="a6">Одной подпиской пользуются несколько устройств одновременно: телефон, ноутбук, планшет. Ссылка-подписка сама раздаёт актуальную конфигурацию на каждое.</p></details>
+      <details><summary data-i="q7">Что если VPN перестанет работать?</summary><p data-i="a7">Напишите в поддержку прямо в боте — отвечает человек, а не робот. Мы следим за состоянием узлов круглосуточно и меняем параметры маскировки раньше, чем вы заметите проблему.</p></details>
     </div>
   </section>
 
   <!-- ДОКУМЕНТЫ -->
   <section id="docs" class="wrap">
-    <div class="sec-head rev"><span class="tag" data-i="s9tag">Документы</span><h2 data-ih="s9h">Правила <span class="grad">простым языком</span></h2></div>
-    <div class="docs">
-      <div class="doc rev" data-doc="privacy"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z"/></svg></div><h3 data-i="d1">Политика конфиденциальности</h3></div>
-      <div class="doc rev" data-doc="terms"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div><h3 data-i="d2">Условия использования</h3></div>
-      <div class="doc rev" data-doc="nologs"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></div><h3 data-i="d3">Гарантия отсутствия логов</h3></div>
+    <div class="sec-head">
+      <span class="eyebrow" data-i="s9tag">Документы</span>
+      <h2 data-ih="s9h">Правила <span class="grad">простым языком</span></h2>
+    </div>
+    <div style="max-width:640px;margin-inline:auto">
+      <div class="group">
+        <button class="row" data-doc="privacy"><span class="ic i-blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z"/></svg></span><span class="tx"><b data-i="d1">Политика конфиденциальности</b><span data-i="d1s">Какие данные мы не собираем</span></span><span class="chev"></span></button>
+        <button class="row" data-doc="terms"><span class="ic i-indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span><span class="tx"><b data-i="d2">Условия использования</b><span data-i="d2s">Права и обязанности сторон</span></span><span class="chev"></span></button>
+        <button class="row" data-doc="nologs"><span class="ic i-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></span><span class="tx"><b data-i="d3">Гарантия отсутствия логов</b><span data-i="d3s">Что именно не записывается</span></span><span class="chev"></span></button>
+      </div>
     </div>
   </section>
 
-  <!-- ФИНАЛЬНЫЙ CTA -->
+  <!-- ФИНАЛЬНЫЙ ПРИЗЫВ -->
   <section class="wrap">
-    <div class="final rev">
+    <div class="final">
       <h2 data-ih="fh">Готовы вернуть <span class="grad">нормальный интернет</span>?</h2>
       <p class="lead" data-i="fp">Две минуты на подключение. Если не понравится — вернём деньги в течение суток, без вопросов.</p>
       <a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="btn b-main" data-i="cta1">Подключить за 2 минуты</a>
@@ -1010,31 +857,35 @@ footer{position:relative;z-index:5;border-top:1px solid var(--line);background:v
 </main>
 
 <footer>
-  <div class="wrap foot">
-    <div>
-      <a href="#" class="brand"><svg class="m" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="26" fill="url(#g2)"/><path d="M54 20 30 56h16l-4 24 26-38H50z" fill="#06070B"/><defs><linearGradient id="g2" x1="0" y1="0" x2="100" y2="100"><stop stop-color="#00E5C0"/><stop offset="1" stop-color="#4D8DFF"/></linearGradient></defs></svg> Gigabyte</a>
-      <p data-i="ftag">VPN, который не мешает жить: открывает закрытое и не ломает привычное.</p>
-      <p>support@gigabytebot.com</p>
-      <p><a href="https://t.me/givpn_bot" target="_blank" rel="noopener" class="tg">@givpn_bot</a></p>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a href="#" class="brand"><img src="/logo.svg" width="28" height="28" alt="" aria-hidden="true"> Gigabyte</a>
+        <p data-i="ftag">VPN, который не мешает жить: открывает закрытое и не ломает привычное.</p>
+        <p><a href="mailto:support@gigabytebot.com" style="color:var(--blue)">support@gigabytebot.com</a></p>
+      </div>
+      <div><h3 data-i="fs1">Сервис</h3><ul>
+        <li><a href="#why" data-i="n1">Возможности</a></li>
+        <li><a href="#routing" data-i="n2">Технология</a></li>
+        <li><a href="#pricing" data-i="n3">Тарифы</a></li>
+        <li><a href="#setup" data-i="n5">Установка</a></li>
+      </ul></div>
+      <div><h3 data-i="fs2">Документы</h3><ul>
+        <li><a href="#" data-doc="privacy" data-i="d1s2">Политика</a></li>
+        <li><a href="#" data-doc="terms" data-i="d2s2">Условия</a></li>
+        <li><a href="#" data-doc="nologs" data-i="d3s2">Гарантия</a></li>
+      </ul></div>
+      <div><h3 data-i="fs3">Помощь</h3><ul>
+        <li><a href="https://t.me/givpn_bot" target="_blank" rel="noopener" data-i="fh1">Поддержка в Telegram</a></li>
+        <li><a href="#trial" data-i="n4">Пробный доступ</a></li>
+        <li><a href="#faq" data-i="n6">Вопросы</a></li>
+      </ul></div>
     </div>
-    <div><h3 data-i="fs1">Сервис</h3><ul>
-      <li><a href="#why" data-i="n1">Возможности</a></li>
-      <li><a href="#routing" data-i="n2">Технология</a></li>
-      <li><a href="#pricing" data-i="n3">Тарифы</a></li>
-      <li><a href="#setup" data-i="n5">Установка</a></li>
-    </ul></div>
-    <div><h3 data-i="fs2">Документы</h3><ul>
-      <li><a href="#" data-doc="privacy" data-i="d1s">Политика</a></li>
-      <li><a href="#" data-doc="terms" data-i="d2s">Условия</a></li>
-      <li><a href="#" data-doc="nologs" data-i="d3s">Гарантия</a></li>
-    </ul></div>
-    <div><h3 data-i="fs3">Помощь</h3><ul>
-      <li><a href="https://t.me/givpn_bot" target="_blank" rel="noopener" data-i="fh1">Поддержка в Telegram</a></li>
-      <li><a href="#trial" data-i="n4">Пробный доступ</a></li>
-      <li><a href="#faq" data-i="n6">Вопросы</a></li>
-    </ul></div>
+    <div class="copy-line">
+      <span>© 2026 Gigabyte VPN</span>
+      <span data-i="frights">Без логов · без KYC</span>
+    </div>
   </div>
-  <div class="wrap copy-line">© 2026 Gigabyte VPN — <span data-i="frights">все права защищены</span> · no logs</div>
 </footer>
 
 <div class="modal" id="modal"><div class="modal-in"><button class="x-modal" id="mx" aria-label="Закрыть">&times;</button><h3 id="mtitle"></h3><div class="body" id="mbody"></div></div></div>

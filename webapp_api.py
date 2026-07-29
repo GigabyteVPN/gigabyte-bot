@@ -856,10 +856,16 @@ async def api_delete_payment(request: web.Request) -> web.Response:
     if not pay.data or pay.data[0]["user_id"] != user_id:
         return err("Платёж не найден", 404)
     if pay.data[0]["status"] not in ("pending_crypto", "awaiting_hash", "pending_stars"):
-        return err("Можно удалять только ожидающие платежи")
-    await B.supabase.table("payments").delete().eq("id", payment_id).execute()
+        return err("Отменить можно только ожидающий платёж")
+
+    # Строку НЕ удаляем: отменённая операция должна остаться и в базе, и в
+    # истории пользователя. Раньше она стиралась насовсем — человек не мог
+    # доказать, что вообще начинал оплату, а мы теряли след операции.
+    await B.supabase.table("payments").update(
+        {"status": "cancelled"}).eq("id", payment_id).execute()
+    # Ожидание подтверждения снимаем — платёж больше не ждёт действий.
     await B.supabase.table("pending_confirmations").delete().eq("payment_id", payment_id).execute()
-    return ok()
+    return ok({"status": "cancelled"})
 
 
 async def api_promo_activate(request: web.Request) -> web.Response:

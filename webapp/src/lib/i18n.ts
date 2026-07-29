@@ -125,7 +125,13 @@ const dict: Dict = {
   'hist.free': { ru: 'Бесплатные', en: 'Free' },
   'hist.cancelled': { ru: 'Отменённые', en: 'Cancelled' },
   'hist.stDone': { ru: 'Выполнено', en: 'Completed' },
-  'hist.stExpired': { ru: 'Отменён', en: 'Cancelled' },
+  'hist.stExpired': { ru: 'Просрочен', en: 'Expired' },
+  'hist.stCancelled': { ru: 'Отменён', en: 'Cancelled' },
+
+  // ---------- Юридические документы ----------
+  'legal.contents': { ru: 'Содержание', en: 'Contents' },
+  'legal.toTop': { ru: 'Наверх', en: 'Back to top' },
+  'hist.stFailed': { ru: 'Не удался', en: 'Failed' },
   'hist.stProcessing': { ru: 'В обработке', en: 'Processing' },
   'hist.trial': { ru: 'Пробный период', en: 'Trial period' },
   'hist.method': { ru: 'Способ оплаты', en: 'Payment method' },

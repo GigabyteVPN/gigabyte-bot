@@ -4,6 +4,7 @@ import { api, CryptoOrder, Tariff, ServerInfo, HashResult } from '../lib/api';
 import { useApp } from '../lib/AppContext';
 import { tg, hapticFeedback, openInvoice } from '../lib/telegram';
 import { cn } from '../lib/utils';
+import { useCopy } from '../lib/use-copy';
 import { t } from '../lib/i18n';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,18 +26,14 @@ import {
 type Step = 'start' | 'server' | 'tariff' | 'method' | 'crypto_currency' | 'crypto_pay' | 'promo' | 'success';
 
 const CopyRow = ({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) => {
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useCopy();
+  const copied = isCopied('row');
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider px-1">{label}</span>
       <button
-        onClick={() => {
-          navigator.clipboard.writeText(value);
-          hapticFeedback.selectionChanged();
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1800);
-        }}
-        className="bg-black/30 border border-white/[0.06] rounded-2xl px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+        onClick={() => copy(value, 'row')}
+        className="bg-black/30 border border-white/[0.06] rounded-full px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
       >
         <span className={cn('flex-1 text-[14px] text-white/90 break-all', mono && 'font-mono')}>{value}</span>
         {copied ? (

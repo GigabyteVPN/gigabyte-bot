@@ -43,6 +43,7 @@ import logoUrl from '../assets/logo.png';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useLockBodyScroll } from '../lib/scroll-lock';
+import { useCopy, linkOrigin } from '../lib/use-copy';
 
 const CountdownTimer = ({ expiryMs }: { expiryMs: number }) => {
   const [timeLeft, setTimeLeft] = useState<{ d: number; h: number; m: number; s: number } | null>(null);
@@ -289,25 +290,29 @@ const ReceiptModal = ({ payment, onClose }: { payment: Payment; onClose: () => v
 
 // Копируемая строка реквизитов
 const PayCopyRow = ({ label, value }: { label: string; value: string }) => {
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useCopy();
+  const copied = isCopied('row');
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[12px] text-[#8E8E93] font-medium uppercase tracking-wider px-2">{label}</span>
       <button
-        onClick={() => {
-          navigator.clipboard.writeText(value);
-          hapticFeedback.selectionChanged();
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1800);
-        }}
-        className="glass-inner rounded-3xl px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform text-left"
+        onClick={() => copy(value, 'row')}
+        className="glass-inner rounded-full px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-transform text-left relative overflow-hidden"
       >
-        <span className="flex-1 text-[14px] font-mono text-white/90 break-all">{value}</span>
-        {copied ? (
-          <Check className="w-4 h-4 text-[#32D74B] shrink-0" />
-        ) : (
-          <Copy className="w-4 h-4 text-[#0A84FF] shrink-0" />
-        )}
+        <span className={cn('flex-1 text-[14px] font-mono text-white/90 break-all transition-all', copied && 'opacity-0')}>
+          {value}
+        </span>
+        <span
+          className={cn(
+            'absolute inset-0 flex items-center justify-center text-[14px] text-[#32D74B] font-bold tracking-tight opacity-0 transition-opacity duration-300',
+            copied && 'opacity-100',
+          )}
+        >
+          {t('dash.copiedBig')}
+        </span>
+        <span className="shrink-0 relative z-10">
+          {copied ? <Check className="w-4 h-4 text-[#32D74B]" /> : <Copy className="w-4 h-4 text-[#0A84FF]" />}
+        </span>
       </button>
     </div>
   );
@@ -460,7 +465,8 @@ const ReferralPage = ({
   onRedeemed: () => void;
 }) => {
   const [data, setData] = useState<ReferralSummary | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copy, isCopied } = useCopy();
+  const copied = isCopied('ref');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -476,10 +482,7 @@ const ReferralPage = ({
 
   const copyLink = () => {
     if (!data) return;
-    navigator.clipboard.writeText(data.link);
-    hapticFeedback.selectionChanged();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
+    copy(data.link, 'ref');
   };
 
   const share = () => {
@@ -763,8 +766,12 @@ type HistFilter = 'all' | 'paid' | 'free' | 'cancelled';
 const statusMeta = (p: Payment): { label: string; cls: string } => {
   const s = p.status || 'completed';
   if (s === 'completed') return { label: t('hist.stDone'), cls: 'bg-[#32D74B]/15 text-[#32D74B]' };
-  if (s === 'expired') return { label: t('hist.stExpired'), cls: 'bg-[#FF453A]/15 text-[#FF6961]' };
-  return { label: t('hist.stProcessing'), cls: 'bg-[#FF9F0A]/15 text-[#FF9F0A]' };
+  // Отменённый и просроченный — разные вещи: первое сделал сам человек,
+  // второе случилось само через сутки без оплаты.
+  if (s === 'cancelled') return { label: t('hist.stCancelled'), cls: 'bg-white/[0.08] text-white/55' };
+  if (s === 'expired') return { label: t('hist.stExpired'), cls: 'bg-[#FF9F0A]/15 text-[#FF9F0A]' };
+  if (s === 'failed') return { label: t('hist.stFailed'), cls: 'bg-[#FF453A]/15 text-[#FF6961]' };
+  return { label: t('hist.stProcessing'), cls: 'bg-[#0A84FF]/15 text-[#4DA6FF]' };
 };
 
 export default function Dashboard() {
@@ -774,7 +781,7 @@ export default function Dashboard() {
   const [pending, setPending] = useState<Payment[]>([]);
   const [history, setHistory] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const { copiedId, copy } = useCopy();
   const [activeModal, setActiveModal] = useState<'history' | 'referral' | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<Payment | null>(null);
   const [hashPayment, setHashPayment] = useState<Payment | null>(null);
@@ -815,13 +822,6 @@ export default function Dashboard() {
   });
 
   // блокировка фона под модалками — см. useLockBodyScroll ниже
-
-  const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    hapticFeedback.selectionChanged();
-    setTimeout(() => setCopiedId(null), 2000);
-  };
 
   // Колокольчик: вкл/выкл напоминаний от бота (за 24 ч и за 1 ч до отключения)
   const toggleReminders = async () => {
@@ -1082,15 +1082,18 @@ export default function Dashboard() {
                         <span className="text-[13px] text-[#8E8E93] font-medium px-1">{t('dash.subLink')}</span>
                         <div
                           className="bg-black/20 border border-white/[0.05] rounded-full p-3 flex items-center gap-3 cursor-pointer group active:scale-[0.98] transition-transform pl-4 relative overflow-hidden"
-                          onClick={() => handleCopy(sub.sub_link!, `sub${sub.id}`)}
+                          onClick={() => copy(sub.sub_link!, `sub${sub.id}`)}
                         >
+                          {/* В плашке показываем только схему и домен: порт и
+                              путь — служебные подробности, они лишь засоряют
+                              строку. Копируется при этом полная ссылка. */}
                           <div
                             className={cn(
                               'flex-1 truncate font-mono text-[14px] text-[#0A84FF] opacity-90 transition-all',
                               copiedId === `sub${sub.id}` && 'opacity-0 translate-y-2',
                             )}
                           >
-                            {sub.sub_link}
+                            {linkOrigin(sub.sub_link!)}
                           </div>
                           <div
                             className={cn(
@@ -1117,7 +1120,7 @@ export default function Dashboard() {
                             {t('dash.clientId')}
                           </span>
                           <button
-                            onClick={() => handleCopy(sub.email!, `mail${sub.id}`)}
+                            onClick={() => copy(sub.email!, `mail${sub.id}`)}
                             className="bg-black/20 border border-white/[0.05] rounded-full py-2.5 pl-4 pr-3 flex items-center gap-3 active:scale-[0.98] transition-transform relative overflow-hidden"
                           >
                             <span
@@ -1520,7 +1523,7 @@ export default function Dashboard() {
                     return (
                       <div
                         key={p.id}
-                        className="glass border border-white/[0.05] rounded-2xl overflow-hidden shadow-sm"
+                        className="glass border border-white/[0.05] rounded-[28px] overflow-hidden shadow-sm"
                       >
                         <div className="p-4 border-b border-white/[0.05] flex justify-between items-center bg-white/[0.02]">
                           <div className="flex items-center gap-3.5">
@@ -1612,21 +1615,37 @@ export default function Dashboard() {
                               <div className="w-full h-px bg-white/[0.05]" />
                               <div className="flex flex-col gap-1.5">
                                 <span className="text-[14px] text-[#8E8E93]">{t('hist.txid')}</span>
-                                <div className="flex items-center justify-between bg-black/20 p-2.5 rounded-xl border border-white/[0.05]">
-                                  <span className="text-[13px] text-white/50 font-mono truncate max-w-[240px]">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copy(String(p.tx_hash), `hash${p.id}`);
+                                  }}
+                                  className="w-full flex items-center justify-between bg-black/20 py-2.5 pl-4 pr-2.5 rounded-full border border-white/[0.05] active:scale-[0.98] transition-transform relative overflow-hidden"
+                                >
+                                  <span
+                                    className={cn(
+                                      'text-[13px] text-white/50 font-mono truncate max-w-[240px] text-left transition-opacity',
+                                      copiedId === `hash${p.id}` && 'opacity-0',
+                                    )}
+                                  >
                                     {String(p.tx_hash)}
                                   </span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigator.clipboard.writeText(String(p.tx_hash));
-                                      tg.showAlert(t('common.copied'));
-                                    }}
-                                    className="p-2 bg-white/10 hover:bg-white/15 rounded-lg active:scale-95 transition-all ml-3 shrink-0"
+                                  <span
+                                    className={cn(
+                                      'absolute inset-0 flex items-center justify-center text-[13px] text-[#32D74B] font-bold tracking-tight opacity-0 transition-opacity duration-300',
+                                      copiedId === `hash${p.id}` && 'opacity-100',
+                                    )}
                                   >
-                                    <Copy className="w-4 h-4 text-white/70" />
-                                  </button>
-                                </div>
+                                    {t('dash.copiedBig')}
+                                  </span>
+                                  <span className="p-2 bg-white/10 rounded-full ml-3 shrink-0 relative z-10">
+                                    {copiedId === `hash${p.id}` ? (
+                                      <Check className="w-4 h-4 text-[#32D74B]" />
+                                    ) : (
+                                      <Copy className="w-4 h-4 text-white/70" />
+                                    )}
+                                  </span>
+                                </button>
                               </div>
                             </>
                           )}
